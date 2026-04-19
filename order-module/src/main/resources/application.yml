@@ -1,0 +1,161 @@
+server:
+  port: 8082
+  forward-headers-strategy: framework
+# 关键配置, 这个配置会让所有 redirect: 语句生成的 URL 变成相对于当前 Servlet 上下文的路径
+spring.mvc:
+    redirect-context-relative: true
+
+# 数据库配置 (MySQL)
+spring:
+  datasource:
+    type: com.alibaba.druid.pool.DruidDataSource
+    druid:
+      url: jdbc:mysql://localhost:3306/order_db?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&allowPublicKeyRetrieval=true
+      username: root
+      password: 1234
+      driver-class-name: com.mysql.cj.jdbc.Driver
+      # 连接池大小及超时设置
+      initial-size: 5
+      min-idle: 5
+      max-active: 20
+      max-wait: 60000
+      # 启用 StatViewServlet（监控页面）
+      stat-view-servlet:
+        enabled: true
+        url-pattern: /druid/*
+        login-username: admin
+        login-password: 123456
+      # 启用 WebStatFilter（Web 和 JDBC 关联监控数据采集）
+      web-stat-filter:
+        enabled: true
+        url-pattern: /*
+        exclusions: '*.js,*.gif,*.jpg,*.png,*.css,*.ico,/druid/*'
+      # 启用 Druid 内置的监控统计功能
+      filters: stat,wall
+
+  # JPA 配置
+  jpa:
+    hibernate:
+      ddl-auto: update          # 自动更新表结构
+    show-sql: true              # 打印 SQL 日志
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+    defer-datasource-initialization: true   # 让 data.sql 在 Hibernate 建表后执行
+
+  # Redis 配置 (本地默认)
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password:
+      timeout: 2000ms
+
+  # Thymeleaf 缓存关闭 (方便开发)
+  thymeleaf:
+    cache: false
+
+  # session cookie
+  session:
+    cookie:
+      http-only: true           # 防止 XSS 读取 Cookie
+      secure: true              # 仅 HTTPS 传输（生产环境必须）
+      same-site: Strict         # 防止 CSRF（跨站请求伪造）
+
+  # 排除 Spring Security 默认用户自动配置，避免生成随机密码
+  autoconfigure:
+    exclude: org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
+
+  # Elasticsearch 连接（实时写入）
+  elasticsearch:
+    uris: http://localhost:9200
+    connection-timeout: 2s
+    socket-timeout: 30s
+
+# JWT 配置
+jwt:
+  secret: mySecretKeyForJwtGeneration2026!@#   # 生产环境请使用复杂密钥
+  expiration: 1800000           # 30分钟（配置单位ms）
+  cookie-name: JWT_TOKEN
+  refresh-expiration: 86400     # Refresh Token 有效期（秒），1天 = 86400
+
+# 客户端凭证（生产环境请使用加密存储）
+client:
+  clients:
+    client1:
+      secret: secret1
+      scopes:
+        - read
+        - write
+    client2:
+      secret: secret2
+      scopes:
+        - read
+
+# 日志级别
+logging:
+  level:
+    org.springframework.security: DEBUG
+    com.example.ordersystem.security: DEBUG
+
+# 雪花算法配置
+snowflake:
+  worker-id: 1
+  datacenter-id: 1
+
+# TrackingId Cookie 有效期（秒），默认 86400（1天）
+tracking:
+  cookie:
+    max-age: 86400
+
+# 实时写入开关（默认开启）
+operation:
+  log:
+    realtime:
+      enabled: true
+
+# 消息系统切换：kafka 或 rocketmq, 本地默认，Nacos 模式下会被远程配置覆盖
+message:
+  system: kafka
+
+# Kafka 配置
+spring.kafka:
+  bootstrap-servers: localhost:9092
+  producer:
+    key-serializer: org.apache.kafka.common.serialization.StringSerializer
+    value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    acks: all                     # 可靠性配置
+    properties:
+      enable.idempotence: true
+  consumer:
+    key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+    properties:
+      spring.json.trusted.packages: '*'
+    group-id: order-log-group
+    auto-offset-reset: earliest
+    enable-auto-commit: false     # 关闭自动提交，改为手动确认
+  listener:
+    concurrency: 1                # 每个分区单线程，保证顺序
+    ack-mode: manual              # 手动确认模式
+
+# RocketMQ 配置
+rocketmq:
+  name-server: 127.0.0.1:9876
+  producer:
+    group: order-producer-group
+    send-message-timeout: 3000
+    retry-times-when-send-failed: 2
+    # 事务消息专用参数（可选）
+    transaction-check-interval: 5000
+    transaction-timeout: 5000
+  consumer:
+    group: order-consumer-group
+    max-reconsume-times: 16       # 最大重试次数，超过进入死信
+
+payment:
+  check:
+    enabled: true   # 是否启用支付检查（可动态刷新）
+pay:
+  service:
+    url: http://localhost:8081   # 非 Nacos 模式下的直连地址

@@ -1,0 +1,102 @@
+#version4-20260403
+order-system-jwt/
+├── pom.xml
+├── src/
+│   ├── main/
+│   │   ├── java/
+│   │   │   └── com/example/ordersystem/
+│   │   │       ├── OrderSystemApplication.java
+│   │   │       ├── config/
+│   │   │       │   ├── ClientProperties.java
+│   │   │       │   ├── RedisConfig.java
+│   │   │       │   └── SecurityConfig.java
+│   │   │       ├── controller/
+│   │   │       │   ├── ApiController.java
+│   │   │       │   ├── LoginController.java
+│   │   │       │   ├── OrderController.java
+│   │   │       │   └── WelcomeController.java
+│   │   │       ├── entity/
+│   │   │       │   ├── Order.java
+│   │   │       │   └── User.java
+│   │   │       ├── repository/
+│   │   │       │   ├── OrderRepository.java
+│   │   │       │   └── UserRepository.java
+│   │   │       ├── security/
+│   │   │       │   ├── ClientPrincipal.java
+│   │   │       │   ├── JwtAuthenticationFilter.java
+│   │   │       │   ├── JwtUtil.java
+│   │   │       │   └── SecurityUser.java
+│   │   │       ├── service/
+│   │   │       │   ├── OrderService.java
+│   │   │       │   └── UserService.java
+│   │   │       └── util/
+│   │   │           └── DatabaseInitializer.java
+│   │   └── resources/
+│   │       ├── application.properties
+│   │       └── templates/
+│   │           ├── login.html
+│   │           ├── orders.html
+│   │           └── welcome.html
+│   └── test/                                      (测试目录，可忽略)
+└── README.md
+
+version4-主要改动：为您的 JWT 版本订单系统增加 Refresh Token 机制 的完整实现。
+
+该方案实现：
+- Web 用户：Access Token 过期后，过滤器自动使用 Cookie 中的 Refresh Token 签发新 Access Token，完全无感知。
+- API 客户端：提供 /api/refresh 端点，客户端收到 401 时可主动调用刷新，获取新 Access Token。
+
+[注意事项与补充说明]
+
+- 客户端刷新实现：上述方案中，API 客户端需自行实现刷新逻辑：在收到 401 时，使用保存的 refresh_token 调用 /api/refresh 获取新 access_token。服务端不自动为 API 请求刷新，因为无状态特性要求客户端显式更新。
+- Web 端完全透明：由于 Refresh Token 存储在 HttpOnly Cookie 中，过滤器自动检测过期并签发新 Access Token，用户完全无感知。
+- 安全建议：
+    - 生产环境请使用 HTTPS，并为 Cookie 设置 Secure 属性。
+    - Refresh Token 应具有较长有效期（如 1 天），但每次使用时最好更新（refresh token rotation），本例简化未做，可自行增强。
+    - 登出时，应同时删除 Refresh Token（调用 refreshTokenService.deleteRefreshToken）。
+- 登出功能增强：在 LoginController 的登出方法中（或自定义 /logout 接口），增加清除 Refresh Token 的逻辑。
+
+[客户端（第三方 API） 使用 Refresh Token]
+
+- 获取 Access Token 和 Refresh Token
+  客户端首先通过 clientId 和 clientSecret 获取初始令牌。
+curl -X POST "http://localhost:8080/api/token?clientId=client1&clientSecret=secret1"
+
+- 使用 Access Token 获取订单列表
+curl -H "Authorization: Bearer eyJ..." http://localhost:8080/api/users/1/orders
+
+- 使用 Access Token 下单
+curl -X POST \
+  -H "Authorization: Bearer eyJ..." \
+  -H "Content-Type: application/json" \
+  -d '{"productName":"测试商品","quantity":2}' \
+  http://localhost:8080/api/users/1/orders
+
+- 使用 Access Token 取消订单
+curl -X POST -H "Authorization: Bearer eyJ..."  http://localhost:8080/api/users/1/orders/16/cancel
+
+- Access Token 过期后，使用 Refresh Token 刷新
+curl -X POST \
+  -H "Refresh-Token: abc123def456..." \
+  http://localhost:8080/api/refresh_token
+
+[Q:为什么RefreshTokenRepository这么简单就实现了RefreshToken的管理和存储?]
+因为实体类上使用了 @RedisHash 注解，并且使用了 Spring Data Redis 的 Repository 支持。
+Spring Data Redis 会根据 @RedisHash 自动生成 Redis 的 key，并使用 Redis 的 hash 数据结构存储实体的属性。
+CrudRepository 是 Spring Data 的通用接口，Spring Data Redis 提供了对应的实现类（如 RedisKeyValueTemplate 等），
+在运行时动态生成代理，执行 Redis 操作。需要详细说明工作原理。
+因此回答要涵盖：
+- @RedisHash 注解的作用：指定 Redis 的 key 前缀，TTL 等。
+- Spring Data Redis 的 Repository 支持：通过 @EnableRedisRepositories 启用（本项目可能没有显式标注？但 Spring Boot 自动配置会扫描 @RedisHash 并启用）。
+- CrudRepository 的方法（如 save, findById, deleteById）会被转换为 Redis 命令：HMSET, HGETALL, DEL 等。
+- 底层使用 RedisTemplate 或 ReactiveRedisTemplate 执行操作。
+- 索引机制：@Indexed 字段会生成额外的 set 结构用于快速查询。
+根据项目中的代码，RefreshTokenRepository 继承了 CrudRepository，Spring Data Redis 会自动为其生成实现，并利用 RedisHash 注解将对象存储为 Redis 中的 Hash。
+
+[以下是在redis中存储的refresh_token情况(除了2))]
+127.0.0.1:6379> keys *
+1) "refresh_token"
+2) "orders:user:1"
+3) "refresh_token:2_Od0uQpW5U_cBxSesTNqkG7pU8X-BHTSs2zZI5x9g0"
+4) "refresh_token:2_Od0uQpW5U_cBxSesTNqkG7pU8X-BHTSs2zZI5x9g0:idx"
+5) "refresh_token:username:admin"

@@ -1,0 +1,2 @@
+# version6-20260408
+主要改动：如何实现trackingId全链路追踪功能，具体改动说明参见readme-trackingId.txt

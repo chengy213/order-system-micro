@@ -1,0 +1,101 @@
+#v1 - 20260330
+order-system-jwt/
+├── pom.xml
+├── src/
+│   ├── main/
+│   │   ├── java/
+│   │   │   └── com/example/ordersystem/
+│   │   │       ├── OrderSystemApplication.java
+│   │   │       ├── config/
+│   │   │       │   ├── RedisConfig.java
+│   │   │       │   └── SecurityConfig.java
+│   │   │       ├── controller/
+│   │   │       │   ├── LoginController.java
+│   │   │       │   ├── OrderController.java
+│   │   │       │   └── WelcomeController.java
+│   │   │       ├── entity/
+│   │   │       │   ├── Order.java
+│   │   │       │   └── User.java
+│   │   │       ├── repository/
+│   │   │       │   ├── OrderRepository.java
+│   │   │       │   └── UserRepository.java
+│   │   │       ├── security/
+│   │   │       │   ├── CustomUserDetailsService.java
+│   │   │       │   ├── JwtAuthenticationFilter.java
+│   │   │       │   └── JwtUtil.java
+│   │   │       ├── service/
+│   │   │       │   ├── OrderService.java
+│   │   │       │   └── UserService.java
+│   │   │       └── test/
+│   │   │           └── PasswordEncoderTest.java # 启动时初始化默认用户（admin/test 并加密密码），仅做测试用
+│   │   └── resources/
+│   │       ├── application.properties
+│   │       └── templates/
+│   │           ├── login.html
+│   │           ├── orders.html
+│   │           └── welcome.html
+│   └── test/
+│       └── java/ (可选)
+
+[Changes]
+我将为您的项目提供一个基于 JWT（JSON Web Token） 的认证方案，完全替换原有的 HttpSession 方式，
+同时保持与现有业务逻辑的兼容（订单页面、Thymeleaf、Redis 缓存等）。
+该方案将 JWT 存储在 HttpOnly Cookie 中，使得服务端渲染的页面在跳转时能够自动携带 token，
+无需前端 JavaScript 干预，从而完美适配 Thymeleaf 模板。
+
+与当前 Spring Security 实现的共存性思考
+答案是可以共存：Spring Security 支持同时使用多种认证机制（如表单登录、JWT、OAuth2）。
+您可以在同一个应用中为不同路径配置不同的认证方式，
+例如 /api/** 使用 JWT，而 /admin/** 使用 Session。
+但本项目将完全替换为 JWT：由于原有项目已完全使用服务端渲染，且没有对外提供 API，
+为了保持架构简洁，我将彻底移除 HttpSession 依赖，改用 JWT 作为唯一认证凭证，
+并将 JWT 存放在 HttpOnly Cookie 中。这种方式保留了页面无感跳转的优势，同时实现了无状态认证，便于水平扩展。
+
+运行验证
+- 启动应用，访问 http://localhost:8080/ 显示欢迎页。
+- 点击登录，输入 admin / 123456，提交后浏览器应收到名为 JWT_TOKEN 的 HttpOnly Cookie。
+- 重定向到 /orders，订单页面正常显示。
+- 查看浏览器开发者工具 → Application → Cookies，确认存在 JWT_TOKEN，且值不为空。
+- 刷新页面或跳转到其他受保护页面，均能保持登录状态（JWT 自动携带）。
+- 点击退出登录，Cookie 被清除，跳回欢迎页。
+
+Note1: here is the value of the http session keys in the redis
+
+127.0.0.1:6379> keys *
+1) "orders:user:1"
+
+Note2: quickly init the mysql db
+
+-- 创建数据库（如果尚未创建）
+CREATE DATABASE IF NOT EXISTS `order_db`
+  DEFAULT CHARACTER SET utf8mb4
+  DEFAULT COLLATE utf8mb4_unicode_ci;
+
+USE `order_db`;
+
+-- 用户表
+CREATE TABLE IF NOT EXISTS `t_user` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `username` varchar(100) NOT NULL COMMENT '用户名',
+  `password` varchar(100) NOT NULL COMMENT '密码（明文，示例用）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_username` (`username`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户表';
+
+-- 订单表
+CREATE TABLE IF NOT EXISTS `t_order` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `order_no` varchar(32) NOT NULL COMMENT '订单号（唯一）',
+  `user_id` bigint NOT NULL COMMENT '用户ID，关联 t_user.id',
+  `product_name` varchar(200) DEFAULT NULL COMMENT '商品名称',
+  `quantity` int DEFAULT NULL COMMENT '数量',
+  `status` int DEFAULT '0' COMMENT '订单状态：0-正常，1-已取消',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_order_no` (`order_no`),
+  KEY `idx_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单表';
+
+mysql> INSERT INTO `t_user` (`username`, `password`) VALUES
+    -> ('admin', '123456'),
+    -> ('test', 'test123');

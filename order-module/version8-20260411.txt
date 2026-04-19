@@ -1,0 +1,79 @@
+#version8-20260411
+JWT 订单系统 Version 8 – Kafka 异步日志实现
+order-system-jwt/
+├── pom.xml                                                 # 新增 Spring Kafka 依赖
+├── src/main/java/com/example/ordersystem/
+│   ├── config/
+│   │   ├── KafkaTopicConfig.java                          # ✨ 新增：Kafka 主题配置
+│   │   └── SnowflakeIdConfig.java                         # ✅ 已存在（Hutool 雪花算法）
+│   ├── entity/
+│   │   └── OperationLog.java                              # ✅ 修改：实现 Serializable
+│   ├── messaging/                                         # ✨ 新增包：Kafka 相关组件
+│   │   ├── KafkaEventPublisher.java                       # 消息发布器（替代异步写 ES）
+│   │   ├── KafkaEventConsumer.java                        # 消息消费者（写 ES + 幂等）
+│   │   └── KafkaOrderOperationEvent.java                  # Kafka 消息体（包装 OperationLog）
+│   ├── util/
+│   │   └── IdempotentHelper.java                          # ✨ 新增：Redis 幂等工具
+│   ├── aop/
+│   │   └── OperationLogAspect.java                        # ✅ 修改：改为发布 Kafka 消息
+│   └── service/
+│       └── OperationLogService.java                       # ❌ 删除或废弃（不再直接调用）
+└── src/main/resources/
+    └── application.properties                             # ✅ 修改：新增 Kafka 配置
+
+关键改动日志（Version 8）
+1. 移除直接异步写 ES 的方式
+- 原实现：OperationLogAspect 直接调用 OperationLogService.logOrderOperation()，该方法内部使用 @Async 线程池异步写入 Elasticsearch。
+- 问题：无法保证跨服务的顺序性，且不支持分布式事务。
+- 改动：删除 OperationLogService 中的异步写入逻辑，不再直接调用 esRepository.save()。
+
+2. 引入 Kafka 作为异步消息中间件
+- 新增依赖：spring-kafka
+- 配置：
+    - 主题 order-operations，分区数 3，副本数 1
+    - 生产者使用 JsonSerializer
+    - 消费者关闭自动提交，改为手动确认 (AckMode.MANUAL)
+    - 每个分区单线程消费 (concurrency=1)，保证顺序
+
+3. 定义 Kafka 消息体 KafkaOrderOperationEvent
+- 包含 messageId（雪花算法生成，全局唯一）和 operationLog（完整的 OperationLog 实体）
+- 消息 key 使用 partitionKey（创建订单时为 userId，取消订单时为 orderId），保证同一订单/用户的消息进入同一分区，从而实现顺序消费。
+
+4. 新增 KafkaEventPublisher 发布消息
+- AOP 切面在订单操作成功后，构造 OperationLog 对象，调用 KafkaEventPublisher.publish() 发送消息。
+- 发送前生成 messageId，用于后续幂等判断。
+
+5. 新增 KafkaEventConsumer 消费消息并写入 ES
+- 使用 @KafkaListener 监听 order-operations 主题。
+- 手动确认：处理成功后才调用 acknowledgment.acknowledge()，失败则不确认，消息会重新投递。
+- 幂等机制：基于 Redis 存储已处理的 messageId，避免重复消费（例如 Kafka 重试导致的重复消息）。
+    - IdempotentHelper：封装 Redis 的 setIfAbsent 操作，过期时间 1 小时。
+    - 消费时先检查 isProcessed(messageId)，若已处理则直接确认并跳过。
+
+6. 顺序保证
+- 同一 orderId（取消订单）或 userId（创建订单）的所有消息使用相同的 partitionKey，Kafka 保证同一分区内消息有序。
+- 消费者设置 concurrency=1，每个分区由单线程处理，避免并发乱序。
+
+7. 序列化兼容
+- KafkaOrderOperationEvent 和 OperationLog 均实现 Serializable，确保跨 JVM 传输兼容。
+- 使用 JSON 序列化，字段格式与 ES 存储保持一致。
+
+8. 废弃的类/方法
+- OperationLogService.logOrderOperation() 方法不再使用（可删除或注释）。
+- 原有的 @Async 线程池配置 (AsyncConfig) 可保留，但不再用于日志写入。
+
+✅ 版本功能对比
+特性	           Version 7（@Async 直接写 ES）	        Version 8（Kafka 异步）
+异步方式	        本地线程池	                            消息队列（Kafka）
+顺序保证	        无	                                分区有序 + 单线程消费
+幂等机制	        无（ES 文档 ID 唯一）	                Redis 记录消息 ID
+可靠性	        进程崩溃可能丢失	                    持久化，至少一次
+跨服务解耦	    不支持	                            支持
+手动确认	        不适用	                            是（防止丢失）
+
+[运行结果]
+#控制台输出:
+2026-04-11 23:36:26.019 [http-nio-8080-exec-6] INFO  c.e.o.messaging.KafkaEventPublisher
+- Kafka 消息发送成功: messageId=2042990161238822912, partitionKey=47, operation=CANCEL_ORDER
+2026-04-11 23:36:26.346 [org.springframework.kafka.KafkaListenerEndpointContainer#0-0-C-1] INFO  c.e.o.messaging.KafkaEventConsumer
+- Kafka 消费者写入 ES 成功: messageId=2042990161238822912, docId=2042987976778190848_CANCEL_ORDER_20260411233626018

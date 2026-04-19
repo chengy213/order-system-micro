@@ -1,0 +1,67 @@
+#order-system-jwt Version 10
+
+[版本概述]
+在 Version 9（支持 Kafka 与 RocketMQ 普通消息切换）基础上，
+新增基于 RocketMQ 事务消息的库存管理功能，实现用户可用库存的扣减与回补，保证订单创建/取消与库存变动的最终一致性。
+
+order-system-jwt/
+├── src/main/java/com/example/ordersystem/
+│   ├── config/
+│   │   ├── SecurityConfig.java                         # 修改：放行 /admin/stock/**
+│   │   └── StockTransactionListener.java               # 新增：RocketMQ 事务消息监听器（本地事务执行+回查）
+│   ├── controller/
+│   │   ├── ApiController.java                          # 修改：第三方 API 改用事务消息，返回库存信息
+│   │   ├── OrderController.java                        # 修改：订单页面显示库存；下单/取消改用事务消息
+│   │   └── StockAdminController.java                   # 新增：管理员调整库存接口
+│   ├── entity/
+│   │   ├── StockTxLog.java                             # 新增：事务日志实体（记录本地事务状态）
+│   │   └── User.java                                   # 修改：增加 availableStock、version 字段
+│   ├── repository/
+│   │   ├── StockTxLogRepository.java                   # 新增：事务日志 JPA 接口
+│   │   └── UserRepository.java                         # 修改：增加乐观锁更新库存方法
+│   ├── service/
+│   │   ├── OrderService.java                           # 修改：新增 createPendingOrder、cancelOrderOnly
+│   │   └── StockService.java                           # 新增：库存业务逻辑（乐观锁+Redis缓存）
+│   ├── messaging/rocketmq/
+│   │   ├── StockTransactionMessagePublisher.java       # 新增：发送库存事务消息
+│   │   └── StockTransactionMessageConsumer.java        # 新增：消费库存事务消息，写入 ES
+│   └── util/
+│       └── IdempotentHelper.java                       # 保持不变（已在 Version 9 存在）
+├── src/main/resources/
+│   └── application.yml                                 # 修改：新增 RocketMQ 事务消息配置及库存消费者组
+└── src/main/resources/db/migration/                    # 可选：数据库迁移脚本
+    └── V10__add_stock_and_tx_log.sql                   # 新增：DDL 脚本（t_user 增加字段，创建 stock_tx_log）
+
+数据库变更
+表名	            变更内容
+t_user	        新增 available_stock INT NOT NULL DEFAULT 1000，新增 version INT NOT NULL DEFAULT 0（乐观锁）
+stock_tx_log	新建表，记录事务消息的本地事务执行状态（txId, orderId, userId, operation, amount, status, create_time）
+
+更改用户可用库存：
+curl -X PUT "http://localhost:8080/admin/user/${userId}/stock?stock=1000"
+
+📌 版本功能对比
+功能点	        Version 9	                                Version 10
+消息系统	        Kafka + RocketMQ 可选（普通日志消息）	        同 Version 9，额外新增 RocketMQ 事务消息用于库存
+用户库存	        无	                                        支持，初始 1000，乐观锁 + Redis 缓存
+下单流程	        直接创建订单 + 写 ES	                        创建订单 + 发送事务消息扣减库存（最终一致）
+取消订单	        直接取消订单 + 写 ES	                        取消订单 + 事务消息回补库存
+库存管理接口	    无	                                        提供 /admin/stock/{userId} 管理接口
+事务消息消费者	无	                                        消费库存事务消息，将库存变更写入 ES
+ES 操作日志	    订单操作日志	                            订单操作日志 + 库存变更日志（operation=STOCK_CREATE/STOCK_CANCEL）
+
+Q1: 为什么 executeLocalTransaction 的执行时机看起来比 sendStockTransaction 早？
+
+实际顺序是：
+- sendStockTransaction 方法被调用 → 发送半消息（Half Message）到 Broker。
+- Broker 存储半消息成功后，立即回调生产者的 executeLocalTransaction 方法。
+- 你的本地事务（库存扣减）执行完成后，返回 COMMIT/ROLLBACK/UNKNOWN。
+- Broker 根据返回结果决定是否将半消息变为可见（Commit）或删除（Rollback）。
+
+Q2: 当库存不足时，会发生什么？
+2026-04-14 21:31:29.350 [http-nio-8080-exec-2] ERROR c.e.o.c.StockTransactionListener - 本地事务执行失败
+java.lang.RuntimeException: 库存不足
+	at com.example.ordersystem.service.OrderStockTransactionService.createOrderAndDecreaseStock(OrderStockTransactionService.java:60)
+	...
+2026-04-14 21:31:29.365 [http-nio-8080-exec-2] WARN  c.e.o.m.r.StockTransactionMessagePublisher - 创建订单事务消息已回滚: txId=2044045876271386624, userId=1, sendStatus=SEND_OK
+

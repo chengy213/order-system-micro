@@ -1,0 +1,67 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: gateway-module
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+      routes:
+        # 订单模块路由：代理所有业务路径（前端页面和API）
+        - id: order-service
+          uri: lb://order-module
+          predicates:
+            - Path=/,/orders/**,/order/**,/login,/logout,/admin/**,/api/**,/welcome,/css/**,/js/**,/error
+        # 支付模块路由：仅代理支付检查接口
+        - id: pay-service
+          uri: lb://pay-module
+          predicates:
+            - Path=/api/pay/**
+    nacos:
+      discovery:
+        server-addr: localhost:8848
+        enabled: ${NACOS_ENABLED:false}
+        username: nacos
+        password: 1234
+    sentinel:
+      transport:
+        dashboard: localhost:8858   # 指向你启动的 Sentinel 控制台地址和端口
+        port: 8719                 # 应用与控制台交互的端口，确保不冲突
+      eager: true
+      filter:
+        enabled: true
+      scg:
+        fallback:
+          mode: response
+          response-status: 429
+          response-body: '{"code":429,"message":"Too many requests"}'
+      datasource:
+        # 数据源名称，可自定义
+        ds-api-group:
+          nacos:
+            server-addr: ${spring.cloud.nacos.discovery.server-addr:localhost:8848}
+            data-id: gateway-sentinel-api-group
+            group-id: DEFAULT_GROUP
+            rule-type: gw-api-group
+            username: nacos          # 添加用户名
+            password: 1234           # 添加密码
+        ds-flow:
+          nacos:
+            server-addr: ${spring.cloud.nacos.discovery.server-addr:localhost:8848}
+            data-id: gateway-sentinel-rules
+            group-id: DEFAULT_GROUP
+            rule-type: gw-flow   # 网关流控规则类型
+            username: nacos          # 添加用户名
+            password: 1234           # 添加密码
+
+jwt:
+  secret: mySecretKeyForJwtGeneration2026!@#
+
+logging:
+  level:
+    org.springframework.cloud.gateway: DEBUG
+    org.springframework.cloud.loadbalancer: DEBUG

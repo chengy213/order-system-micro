@@ -1,0 +1,52 @@
+📌 Version 11 改动日志
+order-system/
+├── src/main/java/com/example/ordersystem/
+│   ├── controller/
+│   │   ├── AdminController.java               # 重命名并新增（原 StockAdminController）
+│   │   └── StockAdminController.java          # 删除（已重命名为 AdminController）
+│   ├── entity/
+│   │   └── User.java                          # 修改：移除 @GeneratedValue、@Version；添加普通字段 version
+│   ├── config/
+│   │   └── SecurityConfig.java                # 修改：放行 /admin/users 路径
+│   └── util/
+│       └── GeneSnowflake.java                 # 保持不变（雪花算法实现）
+└── src/main/resources/
+    └── application.properties                 # 新增配置项：snowflake.datacenter-id（已有，无需改动）
+
+一、核心目标
+- 统一 ID 生成：为 t_user、t_order、stock_tx_log 等表使用自定义雪花算法 GeneSnowflake 生成主键 ID。
+- 基因嵌入：订单 ID 和库存日志 ID 中嵌入用户 ID 的基因（userId % 100），位于 ID 的最低 7 位，支持通过位运算快速提取基因。
+- 数据库主键改造：移除所有相关表的自增主键属性，完全由应用层控制 ID 生成，避免 JPA 手动赋值冲突。
+
+二、位数分配
+- 41 位时间戳
+- 8 位工作机器 ID（0-255，通过配置 snowflake.worker-id 设置）
+- 8 位序列号（每毫秒最多 256 个 ID）
+- 7 位基因（0-127）
+
+总位数：41+8+8+7 = 64 位
+生成的userId示例：
+尾号[0-49]:userId=606687366551207936
+尾号[50-99]:userId=606758341263261696
+
+三、基因提取方法（示例）
+// 从订单 ID 中提取用户基因（userId % 100）
+long orderId = 606311204230561794L;
+long gene = orderId & 0x7F;  // 结果为 2
+
+# 创建新注册用户（假设 datacenter-id=1，尾数应在 0-49）
+curl -X POST -H "Content-Type: application/json" -d '{"username":"frank","password":"1234"}' http://localhost:8080/admin/users
+
+四、版本功能对比
+功能点	        Version 10	            Version 11
+雪花算法实现	    Hutool Snowflake	    自定义 GeneSnowflake
+基因嵌入	        支持（位于第 16-22 位）	支持（位于最低 7 位）
+主键生成	        部分表自增 + 部分雪花	    全部表统一由应用层生成
+数据库自增	    存在	                    已移除
+直观性（取模）	不符合期望	            仍不符合（但可通过位运算提取）
+性能	            高	                    高（无依赖，纯 Java）
+
+五、已知问题与后续优化
+- 基因提取不够直观：当前只能通过位运算 (orderId & 0x7F) 获取，无法直接通过取模 % 100 得到。后续可考虑调整位数分配或增加冗余字段。
+- 时钟回拨处理：当前采用简单等待策略，生产环境建议使用 NTP 时钟同步或回拨补偿机制（已预留扩展点）。
+

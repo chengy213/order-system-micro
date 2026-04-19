@@ -1,0 +1,30 @@
+# version5-20260406
+主要改动：启用druid数据库连接池代替HikariCP数据库连接池。
+
+改动很少：
+1. pom.xml新增druid数据库连接池依赖
+2. 修改application.properties的sql配置
+- spring.datasource.druid.* 是 Druid 专用的配置前缀，与原生 spring.datasource 配置不冲突。
+- 监控页面地址：http://localhost:8080/druid，用户名 admin，密码 123456（可在配置中修改）。
+- 可以根据需要调整连接池参数。
+3. 修改securityConfig配置，放行2中的http://localhost:8080/druid监控链接（注意需要增加IP访问限制，只能允许内部访问）
+
+[注意事项]
+- 兼容性：druid-spring-boot-3-starter 专为 Spring Boot 3.x 设计，JDK 17 兼容。
+- 排除默认连接池：添加 Druid 依赖后，Spring Boot 会自动使用 Druid 作为数据源，无需额外排除 HikariCP。
+- 监控安全：生产环境建议修改 /druid 路径的登录密码，并限制访问 IP（bean.addInitParameter("allow", "127.0.0.1")）。
+- 日志监控：可以配置 Druid 的慢 SQL 记录等高级功能，详见 Druid 官方文档。
+
+[druid最重要的两个组件]
+两个组件各司其职
+
+- WebStatFilter (数据采集器)：它的任务是收集原始数据，特别是Web 请求和数据库访问的关联数据（例如一个 HTTP 请求触发了哪些 SQL、执行耗时等）。
+没有它，监控页面就会缺少核心的 "Web 应用"、"URI 监控" 和 "SQL 监控" 等模块的关键数据。
+- StatViewServlet (数据展示器)：它提供了一个可视化仪表盘，将 WebStatFilter 和 StatFilter 收集到的数据，
+以 HTML 页面的形式直观地展示出来。没有它，你就无法通过浏览器便捷地查看和分析监控数据。
+
+因此，可以这样理解它们的协作流程：
+- WebStatFilter 默默地在后台收集数据。
+- StatViewServlet 读取这些数据并将其渲染成你可以在浏览器中看到的监控页面。
+
+补充说明：除了 WebStatFilter，还有一个 StatFilter 负责收集 SQL 执行、连接池使用情况等基础统计数据。filters: stat,wall 配置中的 stat 指的就是它，通常也会一并开启。

@@ -1,0 +1,44 @@
+#version2-20260331
+order-system-jwt/
+├── pom.xml
+├── src/
+│   ├── main/
+│   │   ├── java/
+│   │   │   └── com/example/ordersystem/
+│   │   │       ├── OrderSystemApplication.java
+│   │   │       ├── config/
+│   │   │       │   ├── ClientProperties.java               # 客户端配置属性（clientId, secret, scopes）
+│   │   │       │   ├── RedisConfig.java                    # Redis 序列化配置
+│   │   │       │   └── SecurityConfig.java                 # Spring Security 核心配置（JWT过滤器、路径权限、方法级安全）
+│   │   │       ├── controller/
+│   │   │       │   ├── ApiController.java                  # 对外 REST API（获取token、下单、取消、查询订单）
+│   │   │       │   ├── LoginController.java                # 登录页面和登录处理（生成用户JWT）
+│   │   │       │   ├── OrderController.java                # Web 订单页面（使用 @AuthenticationPrincipal）
+│   │   │       │   └── WelcomeController.java              # 欢迎页（根据登录状态跳转）
+│   │   │       ├── entity/
+│   │   │       │   ├── Order.java                          # 订单实体（JPA）
+│   │   │       │   └── User.java                           # 用户实体（JPA）
+│   │   │       ├── repository/
+│   │   │       │   ├── OrderRepository.java                # 订单数据访问接口
+│   │   │       │   └── UserRepository.java                 # 用户数据访问接口
+│   │   │       ├── security/
+│   │   │       │   ├── ClientPrincipal.java                # 客户端认证主体（实现 UserDetails，包含 scopes）
+│   │   │       │   ├── JwtAuthenticationFilter.java        # JWT 过滤器（从 Cookie/Header 提取 token）
+│   │   │       │   ├── JwtUtil.java                        # JWT 工具类（生成、解析、验证）
+│   │   │       │   └── SecurityUser.java                   # 用户认证主体（包含 userId、username）
+│   │   │       ├── service/
+│   │   │       │   ├── OrderService.java                   # 订单业务逻辑（含 Redis 缓存）
+│   │   │       │   └── UserService.java                    # 用户认证与查询（密码比对）
+│   │   │       └── test/
+│   │   │           └── PasswordEncoderTest.java # 启动时初始化默认用户（admin/test 并加密密码），仅做测试用
+│   │   └── resources/
+│   │       ├── application.properties                      # 主配置文件（数据库、Redis、JWT、客户端凭证等）
+│   │       └── templates/
+│   │           ├── login.html                              # 登录页面
+│   │           ├── orders.html                             # 订单主页（Web）
+│   │           └── welcome.html                            # 欢迎页
+│   └── test/                                               # 测试目录（未使用）
+└── README.md                                               # （可选）项目说明
+
+[Changes]
+- 增加了新的client API验证支持

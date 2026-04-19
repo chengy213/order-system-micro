@@ -1,0 +1,76 @@
+Version 12 改动日志
+核心价值：为订单系统提供 Nacos 服务注册发现与动态配置能力，实现消息系统的无感切换，支持云原生部署。
+
+order-system-jwt/
+├── pom.xml                                                 # 修改：新增 Nacos 相关依赖
+├── src/main/java/com/example/ordersystem/
+│   ├── OrderSystemApplication.java                        # 修改：添加 @EnableDiscoveryClient
+│   ├── config/
+│   │   └── DynamicMessageSystemConfig.java                # 新增：动态消息系统配置（@RefreshScope）
+│   └── aop/
+│       └── OperationLogAspect.java                        # 修改：注入 MessagePublisher 方式微调（无需改动）
+├── src/main/resources/
+│   ├── bootstrap.yml                                      # 新增：Nacos 配置中心与注册中心配置
+│   └── application.yml                                    # 修改：删除原有 nacos.enabled 配置（改用 JVM 参数）
+└── README.md                                              # 可选：更新说明文档
+
+一、新增功能
+1.Nacos 服务注册与发现
+    - 应用启动时可选择注册到 Nacos 服务中心，实现服务实例管理。
+    - 通过JVM启动参数-DNACOS_ENABLED=true控制是否启用，默认 false（本地独立运行）。
+    - 支持使用 @LoadBalanced RestTemplate 进行服务间调用。
+
+2. Nacos 动态配置管理
+    - 应用启动时从 Nacos 配置中心拉取 order-system-jwt.yaml 配置文件。
+    - 支持动态刷新配置项（如 message.system），无需重启应用即可切换消息系统（Kafka ↔ RocketMQ）。
+    - 使用 @RefreshScope 实现 MessagePublisher Bean 的热替换。
+
+二、使用说明
+1. 本地独立运行（不依赖 Nacos）
+java -jar order-system.jar
+此时 -DNACOS_ENABLED=false，应用使用本地 application.yml 中的配置。
+
+2. 启用 Nacos 模式
+前提：请使用nacos-start命令将nacos服务器启动起来；启动日志在该目录下：
+tail -f /Users/allen/ai-infra/nacos/standalone/nacos-3.2.1-2026.03.30/logs/startup.log
+
+java -DNACOS_ENABLED=true -jar order-system.jar
+应用会连接到 Nacos（localhost:8848），会先加载新的bootstrap.yml配置，后面再拉取远程配置，并将本服务注册到服务中心。
+
+Q1: 如何登录到nacos控制台？
+访问vim /Users/allen/ai-infra/nacos/standalone/nacos-3.2.1-2026.03.30/conf/application.properties
+找到nacos.console.port这个配置属性，默认端口是8080，这会和我们的本地应用端口冲突，所以我改成了9090
+A: 访问http://localhost:9090/,会引导你注册登录。
+然后你就可以去配置管理中心新增配置了，或者去服务管理中心查看应用实例情况。这里我新建了一个动态配置验证动态配置的推送情况：
+
+在 Nacos 控制台创建 Data ID: order-system-jwt.yaml，Group: DEFAULT_GROUP，内容：
+message:
+  system: kafka   # 可动态修改
+  
+Q2: nacos如何实现动态配置监听和更新？
+
+1. 系统启动后，NacosContextRefresher会去监听归属于dataId=order-system-jwt（本应用）的动态配置变更！
+c.a.n.client.config.impl.CacheData - config listener notify warn timeout millis use default 60000 millis 
+c.a.n.client.config.impl.CacheData - nacos.cache.data.init.snapshot = true 
+c.a.n.c.config.impl.ClientWorker - [fixed-localhost_8848] [subscribe] order-system-jwt+DEFAULT_GROUP
+c.a.n.client.config.impl.CacheData - [fixed-localhost_8848] [add-listener] ok, tenant=, dataId=order-system-jwt, group=DEFAULT_GROUP, cnt=1
+c.a.c.n.r.NacosContextRefresher - [Nacos Config] Listening config: dataId=order-system-jwt, group=DEFAULT_GROUP
+c.a.n.c.config.impl.ClientWorker - [fixed-localhost_8848] [subscribe] order-system-jwt.yaml+DEFAULT_GROUP
+c.a.n.client.config.impl.CacheData - [fixed-localhost_8848] [add-listener] ok, tenant=, dataId=order-system-jwt.yaml, group=DEFAULT_GROUP, cnt=1
+c.a.c.n.r.NacosContextRefresher - [Nacos Config] Listening config: dataId=order-system-jwt.yaml, group=DEFAULT_GROUP
+
+2. 有动态配置变更后，如何推送？
+
+c.alibaba.nacos.common.remote.client - [71c6623d-e829-4edd-8f3d-b62f0249135b_config-0] Receive server push request, request = ConfigChangeNotifyRequest, requestId = 3
+c.a.n.c.config.impl.ClientWorker - [71c6623d-e829-4edd-8f3d-b62f0249135b_config-0] [server-push] config changed. dataId=order-system-jwt.yaml, group=DEFAULT_GROUP,tenant=null
+c.alibaba.nacos.common.remote.client - [71c6623d-e829-4edd-8f3d-b62f0249135b_config-0] Ack server push request, request = ConfigChangeNotifyRequest, requestId = 3
+c.a.n.c.config.impl.ClientWorker - [fixed-localhost_8848] [data-received] dataId=order-system-jwt.yaml, group=DEFAULT_GROUP, tenant=, md5=6c7cfdf4bf66d255f874f1674f0921df, content=message:
+  system: kafka   # 可动态修改rocketmq, type=yaml
+c.a.n.client.config.impl.CacheData - [fixed-localhost_8848] [notify-listener] task execute in nacos thread, dataId=order-system-jwt.yaml, group=DEFAULT_GROUP,tenant=, md5=6c7cfdf4bf66d255f874f1674f0921df, listener=com.alibaba.cloud.nacos.refresh.NacosContextRefresher$1@52837c52
+c.a.n.client.config.impl.CacheData - [fixed-localhost_8848] [notify-context] dataId=order-system-jwt.yaml, group=DEFAULT_GROUP,tenant=, md5=6c7cfdf4bf66d255f874f1674f0921df
+c.a.c.n.c.NacosPropertySourceBuilder - Ignore the empty nacos configuration and get it based on dataId[order-system-jwt] & group[DEFAULT_GROUP]
+o.s.c.b.c.PropertySourceBootstrapConfiguration - Located property source: [BootstrapPropertySource {name='bootstrapProperties-order-system-jwt.yaml,DEFAULT_GROUP'}, BootstrapPropertySource {name='bootstrapProperties-order-system-jwt,DEFAULT_GROUP'}]
+o.s.boot.SpringApplication - No active profile set, falling back to 1 default profile: "default"
+o.s.boot.SpringApplication - Started application in 0.382 seconds (process running for 427.157)
+o.s.c.e.event.RefreshEventListener - Refresh keys changed: [message.system]
+c.a.n.client.config.impl.CacheData - [fixed-localhost_8848] [notify-ok] dataId=order-system-jwt.yaml, group=DEFAULT_GROUP,tenant=, md5=6c7cfdf4bf66d255f874f1674f0921df, listener=com.alibaba.cloud.nacos.refresh.NacosContextRefresher$1@52837c52 ,job run cost=853 millis.

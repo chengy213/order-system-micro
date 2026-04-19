@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: pay-module
+  cloud:
+    nacos:
+      discovery:
+        server-addr: localhost:8848
+        enabled: ${NACOS_ENABLED:false}
+        username: nacos
+        password: 1234
+      config:
+        enabled: false   # 支付模块不需要配置中心，只注册服务
+server:
+  port: 8081
+  forward-headers-strategy: framework
+# 关键配置, 这个配置会让所有 redirect: 语句生成的 URL 变成相对于当前 Servlet 上下文的路径
+spring.mvc:
+  redirect-context-relative: true

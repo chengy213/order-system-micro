@@ -1,0 +1,55 @@
+#version3-20260403
+order-system-jwt/
+├── pom.xml
+├── src/
+│   ├── main/
+│   │   ├── java/
+│   │   │   └── com/example/ordersystem/
+│   │   │       ├── OrderSystemApplication.java
+│   │   │       ├── config/
+│   │   │       │   ├── ClientProperties.java
+│   │   │       │   ├── RedisConfig.java
+│   │   │       │   └── SecurityConfig.java
+│   │   │       ├── controller/
+│   │   │       │   ├── ApiController.java
+│   │   │       │   ├── LoginController.java
+│   │   │       │   ├── OrderController.java
+│   │   │       │   └── WelcomeController.java
+│   │   │       ├── entity/
+│   │   │       │   ├── Order.java
+│   │   │       │   └── User.java
+│   │   │       ├── repository/
+│   │   │       │   ├── OrderRepository.java
+│   │   │       │   └── UserRepository.java
+│   │   │       ├── security/
+│   │   │       │   ├── ClientPrincipal.java
+│   │   │       │   ├── JwtAuthenticationFilter.java
+│   │   │       │   ├── JwtUtil.java
+│   │   │       │   └── SecurityUser.java
+│   │   │       ├── service/
+│   │   │       │   ├── OrderService.java
+│   │   │       │   └── UserService.java
+│   │   │       └── util/
+│   │   │           └── DatabaseInitializer.java
+│   │   └── resources/
+│   │       ├── application.properties
+│   │       └── templates/
+│   │           ├── login.html
+│   │           ├── orders.html
+│   │           └── welcome.html
+│   └── test/                                      (测试目录，可忽略)
+└── README.md                                      (可选)
+
+版本 3 – 增加外部 API 与细粒度权限（scope）
+日期：2026-04-03
+
+新增功能：
+- 支持 JWT 双渠道认证：Authorization: Bearer 头（API）或 Cookie（Web）
+- 基于 JWT 中 scopes 字段的细粒度权限控制（read / write）
+- 使用 @PreAuthorize 注解进行方法级权限校验
+
+三、版本演进总结
+版本	            核心特性	                    认证方式	                        会话管理	                       API 支持	            权限粒度
+1.0	        Spring Session+Security     集成	Form Login + HttpSession	    Redis（Spring Session）	        无	                基于角色（简单）
+2.0	        JWT 无状态	                JWT (HttpOnly Cookie)	            无状态（无 Session）	            无	                基于 JWT 主体
+3.0	        外部 API + scopes	        JWT (Header + Cookie)	            无状态	                  REST API + 客户端凭证	    方法级 @PreAuthorize (read/write)

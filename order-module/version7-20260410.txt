@@ -1,0 +1,114 @@
+#version7-20260410
+订单操作日志同时实时写入 ES + 异步 JSON 日志（ELK 收集）
+
+一、项目结构（新增/修改的文件）
+src/main/java/com/example/ordersystem/
+├── config/AsyncConfig.java 提供异步线程池
+├── entity/OperationLog.java
+├── repository/OperationLogElasticsearchRepository.java
+├── service/OperationLogService.java 提供一个包装方法，完成实时写ES，并输出纯 JSON 日志（供 Logstash 收集，与实时写入使用完全相同的 docId）
+├── aop/OperationLogAspect.java 提供切面方法
+└── (原有文件不变)
+
+src/main/resources/
+├── application.properties
+├── logback-spring.xml
+└── (原有文件不变)
+
+根目录/
+└── logstash-order.conf   (Logstash 配置文件)，Logstash需要单独启动日志推送！
+
+二、启动与验证
+2.1 启动 Elasticsearch（确保 http://localhost:9200 可访问），ES写入和查询都是9200端口！！！
+2.2 启动 Spring Boot 应用。
+2.3 执行一次下单操作（登录后，在订单页面提交新订单）。
+可以看到日志输出：
+
+2026-04-11 23:36:26.311 [org.springframework.kafka.KafkaListenerEndpointContainer#0-0-C-1] WARN  org.elasticsearch.client.RestClient
+- request [PUT http://localhost:9200/order-operations/_doc/2042987976778190848_CANCEL_ORDER_20260411233626018?refresh=false]
+returned 1 warnings: [299 Elasticsearch-7.17.4-79878662c54c886ae89206c685d9f1051a9d6411 "Elasticsearch built-in security features are not enabled.
+
+Without authentication, your cluster could be accessible to anyone. See https://www.elastic.co/guide/en/elasticsearch/reference/7.17/security-minimal-setup.html to enable security."]
+2026-04-11 23:36:26.345 [org.springframework.kafka.KafkaListenerEndpointContainer#0-0-C-1] WARN  org.elasticsearch.client.RestClient
+- request [POST http://localhost:9200/order-operations/_refresh]
+returned 1 warnings: [299 Elasticsearch-7.17.4-79878662c54c886ae89206c685d9f1051a9d6411 "Elasticsearch built-in security features are not enabled.
+Without authentication, your cluster could be accessible to anyone. See https://www.elastic.co/guide/en/elasticsearch/reference/7.17/security-minimal-setup.html to enable security."]
+
+2.4 查看实时写入结果：写入的Index=order-operations, Timestamp field=operationTime(UTC时间)
+
+curl -X GET "http://localhost:9200/order-operations/_search?q=*&pretty"
+
+ES响应示例：
+{
+  "took" : 14,
+  "timed_out" : false,
+  "_shards" : {
+    "total" : 1,
+    "successful" : 1,
+    "skipped" : 0,
+    "failed" : 0
+  },
+  "hits" : {
+    "total" : {
+      "value" : 5,
+      "relation" : "eq"
+    },
+    "max_score" : 1.0,
+    "hits" : [
+      {
+        "_index" : "order-operations",
+        "_type" : "_doc",
+        "_id" : "2042467089276604416_CANCEL_ORDER_20260410131852882",
+        "_score" : 1.0,
+        "_source" : {
+          "_class" : "com.example.ordersystem.entity.OperationLog",
+          "id" : "2042467089276604416_CANCEL_ORDER_20260410131852882",
+          "trackingId" : "2042467089276604416",
+          "userId" : "1",
+          "username" : "admin",
+          "operation" : "CANCEL_ORDER",
+          "details" : "订单ID:7",
+          "ipAddress" : "0:0:0:0:0:0:0:1",
+          "userAgent" : "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+          "operationTime" : "2026-04-10T13:18:52.882"
+        }
+      },
+      {
+        "_index" : "order-operations",
+        "_type" : "_doc",
+        "_id" : "2042467089276604416_CREATE_ORDER_20260410131902604",
+        "_score" : 1.0,
+        "_source" : {
+          "_class" : "com.example.ordersystem.entity.OperationLog",
+          "id" : "2042467089276604416_CREATE_ORDER_20260410131902604",
+          "trackingId" : "2042467089276604416",
+          "userId" : "1",
+          "username" : "admin",
+          "operation" : "CREATE_ORDER",
+          "details" : "商品:换ES名字,数量:2",
+          "ipAddress" : "0:0:0:0:0:0:0:1",
+          "userAgent" : "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+          "operationTime" : "2026-04-10T13:19:02.604"
+        }
+      },
+      ...
+}
+2.5 启动 Logstash（使用上述配置文件）：
+bin/logstash -f logstash-order.conf
+2.6 观察 Logstash 输出，应看到相同的文档被再次写入（覆盖，但内容一致）。
+2.7 最终一致性验证：无论实时写入和 Logstash 写入谁先谁后，ES 中的文档内容完全相同，且 _id 一致，不会产生重复。
+
+2.8 打开kibana访问(kibana的端口是5601)
+- 编辑kibana配置文件中的hosts
+vim /usr/local/etc/kibana/kibana.yml
+将这一行找到并取消注释即可：elasticsearch.hosts: ["http://localhost:9200"]
+
+- 访问http://localhost:5601/app/management/kibana/indexPatterns
+进入Stack Management/Index patterns菜单,配置一个Index patterns(Data View)
+Index=order-operations, Timestamp field=operationTime
+
+- 访问http://localhost:5601/app/discover
+进入kibana的discover（左边的Analytics菜单下），Change Index Pattern菜单中选择你创建的order-operations*，选择搜索范围，即可进行查询。
+
+- Optional(可选)去Dev Tools 中查看数据情况
+进入kibana左下角的Dev Tools的console，输入GET /order-operations/_search命令，能得到和curl命令一样的响应数据。

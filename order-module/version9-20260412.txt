@@ -1,0 +1,36 @@
+#version9-20260412
+order-system-jwt Version 9 改动日志
+版本概述
+在 Version 8（基于 Kafka 的订单操作日志异步写入）的基础上，新增 RocketMQ 作为第二消息通道，实现与 Kafka 并行运行，并支持通过配置文件一键切换消息系统。Version 9 保持了与 Version 8 完全兼容的业务逻辑，仅扩展了消息发送层的实现。
+
+一、改动文件目录
+order-system-jwt/
+├── pom.xml                                                 # 新增 RocketMQ 依赖
+├── src/main/java/com/example/ordersystem/
+│   ├── messaging/
+│   │   ├── common/                                        # 新增包：共用组件
+│   │   │   ├── OrderOperationEvent.java                   # 共用消息体（原 KafkaOrderOperationEvent 重命名）
+│   │   │   └── MessagePublisher.java                      # 消息发送接口
+│   │   ├── kafka/                                         # Kafka 实现（Version 8 原有，小幅调整）
+│   │   │   ├── KafkaEventPublisher.java                   # 实现 MessagePublisher
+│   │   │   └── KafkaEventConsumer.java                    # 保持不变
+│   │   └── rocketmq/                                      # 新增包：RocketMQ 实现
+│   │       ├── RocketMQEventPublisher.java                # 发送 JSON 字符串到 RocketMQ
+│   │       └── RocketMQEventConsumer.java                 # 从 RocketMQ 消费并写入 ES
+│   ├── config/
+│   │   ├── MessageSystemConfig.java                       # 新增：根据配置动态选择 Publisher Bean
+│   │   └── RocketMQConfig.java                            # 新增：RocketMQ 消费者 Bean 配置
+│   └── aop/
+│       └── OperationLogAspect.java                        # 修改：使用 MessagePublisher 接口发送
+└── src/main/resources/
+    ├── application.properties (或 application.yml)        # 新增 RocketMQ 配置及切换开关
+
+二、版本特性与功能对比
+功能	            Version 8（Kafka 版）	                Version 9（Kafka + RocketMQ）
+消息中间件	    仅 Kafka	                            Kafka 与 RocketMQ 可选，可配置切换
+顺序保证	        分区有序（key 为 orderId/userId）	        相同（RocketMQ 使用 KEYS 头）
+幂等机制	        Redis 记录 messageId	                    相同（共用 IdempotentHelper）
+手动确认	        Kafka 手动 ack	                        RocketMQ 返回 RECONSUME_LATER / CONSUME_SUCCESS
+重试与死信	    Kafka 默认重试策略	                    RocketMQ 配置 maxReconsumeTimes，超限进入死信并记录
+序列化	        Kafka 使用 JsonSerializer	            RocketMQ 手动 JSON 序列化（保证 LocalDateTime 兼容）
+动态切换	        不适用	                                支持，仅需修改 message.system 并重启应用

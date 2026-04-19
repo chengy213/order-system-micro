@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: order-module
+  cloud:
+    nacos:
+      config:
+        server-addr: localhost:8848
+        enabled: ${NACOS_ENABLED:false}
+        file-extension: yaml
+        refresh-enabled: true          # 开启自动刷新
+        group: DEFAULT_GROUP
+        username: nacos          # 添加用户名
+        password: 1234           # 添加密码
+      discovery:
+        server-addr: localhost:8848
+        enabled: ${NACOS_ENABLED:false}   # 是否注册到 Nacos（动态控制）
+        username: nacos          # 添加用户名
+        password: 1234           # 添加密码

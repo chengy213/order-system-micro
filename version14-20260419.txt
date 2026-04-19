@@ -1,0 +1,79 @@
+Version 14 改动日志 – 引入 Spring Cloud Gateway 与 Sentinel 限流
+[版本概述]
+在 Version 13（微服务拆分 + Feign 调用）基础上，新增 Spring Cloud Gateway 作为统一入口，
+URL始终在Gateway module服务和端口上，不会跳转到子服务如订单服务和端口上，具体实现了：
+- 请求路由与负载均衡（支持 Nacos 服务发现）
+- JWT 鉴权（保护支付模块 /api/pay/** 路径）
+- Sentinel 限流（针对订单主页、下单、支付检查接口）
+
+同时，Gateway 模块作为独立微服务运行，用户通过 Gateway 端口（8080）统一访问系统，后端 Order Module（8082）和 Pay Module（8083）不再直接暴露。
+
+[项目结构新增]
+
+order-system-micro/
+├── gateway-module/                     # 新增网关模块
+│   ├── pom.xml
+│   ├── src/main/java/com/example/gateway/
+│   │   ├── GatewayApplication.java
+│   │   ├── filter/JwtAuthenticationFilter.java
+│   │   └── config/SentinelConfig.java
+│   └── src/main/resources/
+│       ├── application.yml
+│       └── (可选) gateway-sentinel-rules.json
+├── order-module/                       # 修改：端口改为 8082，添加代理头配置
+├── pay-module/                         # 修改：端口改为 8083，添加代理头配置
+└── pom.xml                             # 父 pom 添加 gateway-module 及依赖管理
+
+备注：其中gateway-sentinel-rules.json是定义在nacos上：
+dataId=gateway-sentinel-rules
+group=DEFAULT_GROUP
+归属应用=gateway-module
+
+[版本功能对比]
+功能	                    Version 13	                        Version 14
+统一入口	                无（需分别访问 8082、8083）	        Gateway（8080）
+负载均衡	                无（需硬编码 URL）	                通过 Nacos + LB 实现
+鉴权	                    无	                                Gateway 层 JWT 鉴权（支付接口）
+限流	                    无	                                Sentinel 网关限流（3个接口）
+规则持久化	            无	                                支持 Nacos 数据源（可选）
+重定向端口	            会跳转到后端端口	                    始终保持在 Gateway 端口
+
+[常见问题]
+
+Q1: 登录成功后，浏览器被重定向到 http://192.168.1.229:8082/orders（Order Module 的直接地址），而不是保持在Gateway 的 http://192.168.1.229:8080/orders。
+这是因为 Order Module 在重定向时，没有感知到前置 Gateway 的存在，直接基于自身收到的请求（来自 Gateway 转发）构建了重定向 URL。
+
+A: 为了确保重定向始终通过 Gateway，需要让 Order Module 使用正确的 Host 头（即 Gateway 的地址）。
+Spring Boot 提供了 ForwardedHeaderFilter 或 server.forward-headers-strategy 来支持反向代理场景。
+
+方式一：配置 Order Module 信任代理头（推荐）
+在 Order Module 的 application.yml 中添加：
+server:
+  forward-headers-strategy: framework
+重启 Order Module。此后，当 Gateway 转发请求时，Order Module 会使用 X-Forwarded-Host 头（Gateway 会自动添加）来构建重定向 URL，从而跳转到 Gateway 的地址。
+
+Q1追问：为什么会出现跳转到 8082？
+
+Gateway 转发请求到 Order Module 时，默认的 Host 头是目标服务的地址（order-module:8082），而不是原始请求的 Host。
+Order Module 收到请求后，使用当前请求的 Host 头构建重定向 URL，因此产生了 8082 端口。
+通过配置 server.forward-headers-strategy=framework，Order Module 会忽略请求中的 Host 头，
+转而使用 X-Forwarded-Host 头（Gateway 会自动添加），该头的值就是原始请求的 Host（即 Gateway 的地址）。
+
+Q2: 如何解决"redirect:/orders"会使用order module的应用地址和端口号而不是保持使用Gateway的服务地址和端口号？
+
+根本原因是 Spring MVC 默认生成的 redirect: 地址是绝对路径（包含主机和端口），而这些信息是从当前请求的 Host 头中获取的。
+由于 Gateway 转发时 Host 头是下游服务的地址（8082），导致重定向 URL 中包含了 8082 端口。
+
+✅ 最佳解决方案：强制使用相对重定向
+在 Order Module 的 application.yml 中添加以下配置：
+spring:
+  mvc:
+    redirect-context-relative: true
+这个配置会让所有 redirect: 语句生成的 URL 变成相对于当前 Servlet 上下文的路径（例如 /orders），而不是绝对路径。
+浏览器收到相对路径的 Location 头后，会基于当前页面的地址（即 Gateway 的地址 http://192.168.1.229:8080/）进行拼接，从而始终保持在 Gateway 的统一入口下。
+
+📌 为什么之前的 server.forward-headers-strategy=framework 没生效？
+server.forward-headers-strategy=framework 主要用于让 Spring Boot 应用读取反向代理传递的 X-Forwarded-* 头，
+以正确获取客户端的真实 IP、协议等。但它不影响重定向 URL 的生成方式（仍会基于 Host 头生成绝对路径）。
+
+您需要的是生成相对路径，而不是绝对路径，因此 redirect-context-relative: true 是直接有效的方案。

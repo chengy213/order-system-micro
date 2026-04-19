@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>订单主页</title>
+    <style>
+        body { font-family: Arial; margin: 30px; }
+        .header { display: flex; justify-content: space-between; align-items: center; }
+        .logout { background: #dc3545; color: white; padding: 5px 10px; text-decoration: none; border-radius: 4px; }
+        .order-form { margin: 20px 0; padding: 15px; border: 1px solid #ccc; background: #f9f9f9; width: 400px; }
+        .order-form input { margin: 5px 10px 5px 0; padding: 6px; }
+        .order-form button { padding: 6px 12px; background: #28a745; color: white; border: none; cursor: pointer; }
+        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .cancel-btn { background: #ffc107; border: none; padding: 4px 8px; cursor: pointer; }
+        .message { padding: 10px; margin: 10px 0; border-radius: 4px; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+<div class="header">
+    <h2>订单管理系统</h2>
+    <div>
+        欢迎，<span th:text="${username}"></span> | 可用库存：<span th:text="${availableStock}"></span> |
+        <form method="post" th:action="@{/logout}" style="display: inline;">
+            <button type="submit" class="logout" style="background: none; border: none; color: #dc3545; cursor: pointer; text-decoration: underline;">退出登录</button>
+        </form>
+    </div>
+</div>
+
+<div th:if="${success}" class="message success" th:text="${success}"></div>
+<div th:if="${error}" class="message error" th:text="${error}"></div>
+
+<div class="order-form">
+    <h3>新增订单</h3>
+    <form method="post" th:action="@{/order/create}">
+        <input type="text" name="productName" placeholder="商品名称" required/>
+        <input type="number" name="quantity" placeholder="数量" required min="1"/>
+        <button type="submit">下单</button>
+    </form>
+</div>
+
+<h3>我的订单</h3>
+<table>
+    <thead>
+    <tr>
+        <th>订单号</th>
+        <th>商品名称</th>
+        <th>数量</th>
+        <th>状态</th>
+        <th>创建时间</th>
+        <th>操作</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr th:each="order : ${orders}">
+        <td th:text="${order.orderNo}">订单号</td>
+        <td th:text="${order.productName}">商品名称</td>
+        <td th:text="${order.quantity}">数量</td>
+        <td>
+            <span th:if="${order.status == 0}" style="color:green;">正常</span>
+            <span th:if="${order.status == 1}" style="color:gray;">已取消</span>
+        </td>
+        <td th:text="${#temporals.format(order.createTime, 'yyyy-MM-dd HH:mm:ss')}">创建时间</td>
+        <td>
+            <form method="post" th:action="@{/order/cancel/{id}(id=${order.id})}" th:if="${order.status == 0}">
+                <button type="submit" class="cancel-btn">取消订单</button>
+            </form>
+            <span th:if="${order.status == 1}">——</span>
+        </td>
+    </tr>
+    <tr th:if="${orders.isEmpty()}">
+        <td colspan="6" style="text-align:center;">暂无订单，去下一单吧！</td>
+    </tr>
+    </tbody>
+</table>
+</body>
+</html>
