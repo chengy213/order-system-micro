@@ -40,7 +40,7 @@ public class StockTransactionMessagePublisher {
      * @param productName 商品名称
      * @param quantity 数量
      */
-    public void sendCreateOrderTransaction(Long userId, String productName, Integer quantity) {
+    public TransactionSendResult sendCreateOrderTransaction(Long userId, String productName, Integer quantity) {
         String trackingId = MDC.get("trackingId");
         if (trackingId == null) trackingId = "unknown";
 
@@ -72,6 +72,7 @@ public class StockTransactionMessagePublisher {
         //所以下面的info日志会晚于com.example.ordersystem.config.StockTransactionListener.executeLocalTransaction中的日志输出
         TransactionSendResult sendResult = rocketMQTemplate.sendMessageInTransaction(TX_TOPIC + ":create", message, payload);
         logTransactionResult("创建订单", txId, userId, sendResult);
+        return sendResult;
     }
 
     /**

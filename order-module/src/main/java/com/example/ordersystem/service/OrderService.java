@@ -2,8 +2,9 @@ package com.example.ordersystem.service;
 
 import com.example.ordersystem.entity.Order;
 import com.example.ordersystem.repository.OrderRepository;
+import com.example.ordersystem.util.RedisCacheManager;
+import com.example.ordersystem.util.RedisKeyConstants;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -17,19 +18,19 @@ public class OrderService {
     private OrderRepository orderRepository;
 
     @Autowired
-    private RedisTemplate<String, Object> redisTemplate;
+    private RedisCacheManager redisCacheManager;
 
     private static final String CACHE_KEY_PREFIX = "orders:user:";
 
     // ========== 原有业务（订单查询、缓存）==========
     public List<Order> getOrdersByUserId(Long userId) {
-        String cacheKey = CACHE_KEY_PREFIX + userId;
-        List<Order> cachedOrders = (List<Order>) redisTemplate.opsForValue().get(cacheKey);
+        String cacheKey = RedisCacheManager.getUserOrdersKey(userId);
+        List<Order> cachedOrders = (List<Order>) redisCacheManager.get(cacheKey);
         if (cachedOrders != null) {
             return cachedOrders;
         }
         List<Order> orders = orderRepository.findByUserIdOrderByCreateTimeDesc(userId);
-        redisTemplate.opsForValue().set(cacheKey, orders, 1, TimeUnit.HOURS);
+        redisCacheManager.set(cacheKey, orders, RedisKeyConstants.USER_ORDERS_TTL_HOURS, TimeUnit.HOURS);
         return orders;
     }
 
@@ -40,10 +41,5 @@ public class OrderService {
     // ========== 辅助方法 ==========
     public String generateOrderNo() {
         return UUID.randomUUID().toString().replace("-", "").substring(0, 16);
-    }
-
-    public void clearUserOrderCache(Long userId) {
-        String cacheKey = CACHE_KEY_PREFIX + userId;
-        redisTemplate.delete(cacheKey);
     }
 }

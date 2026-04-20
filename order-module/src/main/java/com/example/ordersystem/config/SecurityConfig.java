@@ -37,14 +37,6 @@ public class SecurityConfig {
     private CustomLogoutHandler customLogoutHandler;
 
     /**
-     * 密码编码器，使用 BCrypt 单向哈希
-     */
-    @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
-    }
-
-    /**
      * 安全过滤器链配置
      */
     @Bean

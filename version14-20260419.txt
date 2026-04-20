@@ -24,10 +24,16 @@ order-system-micro/
 ├── pay-module/                         # 修改：端口改为 8083，添加代理头配置
 └── pom.xml                             # 父 pom 添加 gateway-module 及依赖管理
 
-备注：其中gateway-sentinel-rules.json是定义在nacos上：
+备注：
+
+1. 其中gateway-sentinel-rules.json是定义在nacos上：
 dataId=gateway-sentinel-rules
 group=DEFAULT_GROUP
 归属应用=gateway-module
+
+2. Sentinel控制台依赖(Optional)
+请访问:http://localhost:8858/
+用户名/密码：sentinel/sentinel
 
 [版本功能对比]
 功能	                    Version 13	                        Version 14

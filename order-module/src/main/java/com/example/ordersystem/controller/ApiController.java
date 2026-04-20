@@ -9,6 +9,8 @@ import com.example.ordersystem.security.JwtUtil;
 import com.example.ordersystem.service.OrderService;
 import com.example.ordersystem.service.RefreshTokenService;
 import com.example.ordersystem.service.StockService;
+import org.apache.rocketmq.client.producer.LocalTransactionState;
+import org.apache.rocketmq.client.producer.TransactionSendResult;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
@@ -114,8 +116,12 @@ public class ApiController {
         }
         try {
             // 发送事务消息，同步等待本地事务完成
-            stockTxPublisher.sendCreateOrderTransaction(userId, productName, quantity);
-            return ResponseEntity.ok(Map.of("message", "订单创建成功"));
+            TransactionSendResult result = stockTxPublisher.sendCreateOrderTransaction(userId, productName, quantity);
+            if (result.getLocalTransactionState() == LocalTransactionState.COMMIT_MESSAGE) {
+                return ResponseEntity.ok(Map.of("message", "下单成功"));
+            } else {
+                return ResponseEntity.ok(Map.of("message", "下单失败"));
+            }
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", "下单失败: " + e.getMessage()));
         }

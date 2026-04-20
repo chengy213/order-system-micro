@@ -97,6 +97,7 @@ logging:
   level:
     org.springframework.security: DEBUG
     com.example.ordersystem.security: DEBUG
+    org.springframework.orm.jpa:  DEBUG
 
 # 雪花算法配置
 snowflake:

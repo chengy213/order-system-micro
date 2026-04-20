@@ -2,6 +2,7 @@ package com.example.ordersystem.service;
 
 import com.example.ordersystem.entity.User;
 import com.example.ordersystem.repository.UserRepository;
+import com.example.ordersystem.util.RedisCacheManager;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,9 @@ public class UserService {
 
     @Autowired
     private PasswordEncoder passwordEncoder;   // BCrypt 密码编码器
+
+    @Autowired
+    private RedisCacheManager redisCacheManager;
 
     /**
      * 认证用户并返回用户ID
@@ -42,5 +46,19 @@ public class UserService {
      */
     public Optional<User> findByUsername(String username) {
         return userRepository.findByUsername(username);
+    }
+
+    /**
+     * 清除指定用户的所有相关缓存
+     * @param userId 用户ID
+     */
+    public void clearUserCache(Long userId) {
+        // 删除订单列表缓存
+        String ordersKey = RedisCacheManager.getUserOrdersKey(userId);
+        redisCacheManager.delete(ordersKey);
+        // 删除库存缓存
+        String stockKey = RedisCacheManager.getUserStockKey(userId);
+        redisCacheManager.delete(stockKey);
+        // 未来如有其他用户相关缓存，可在此扩展
     }
 }
