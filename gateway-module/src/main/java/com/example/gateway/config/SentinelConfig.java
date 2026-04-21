@@ -35,23 +35,23 @@ public class SentinelConfig {
                             .setMatchStrategy(SentinelGatewayConstants.URL_MATCH_STRATEGY_EXACT));
                 }});
         // API 2: 下单接口限流组
-        ApiDefinition api2 = new ApiDefinition("create_order_api")
-                .setPredicateItems(new HashSet<ApiPredicateItem>() {{
-                    add(new ApiPathPredicateItem()
-                            .setPattern("/order/create")
-                            .setMatchStrategy(SentinelGatewayConstants.URL_MATCH_STRATEGY_EXACT));
-                }});
-        // API 3: 支付检查接口限流组
-        ApiDefinition api3 = new ApiDefinition("pay_check_api")
-                .setPredicateItems(new HashSet<ApiPredicateItem>() {{
-                    add(new ApiPathPredicateItem()
-                            .setPattern("/api/pay/check")
-                            .setMatchStrategy(SentinelGatewayConstants.URL_MATCH_STRATEGY_EXACT));
-                }});
+//        ApiDefinition api2 = new ApiDefinition("create_order_api")
+//                .setPredicateItems(new HashSet<ApiPredicateItem>() {{
+//                    add(new ApiPathPredicateItem()
+//                            .setPattern("/order/create")
+//                            .setMatchStrategy(SentinelGatewayConstants.URL_MATCH_STRATEGY_EXACT));
+//                }});
+//        // API 3: 支付检查接口限流组
+//        ApiDefinition api3 = new ApiDefinition("pay_check_api")
+//                .setPredicateItems(new HashSet<ApiPredicateItem>() {{
+//                    add(new ApiPathPredicateItem()
+//                            .setPattern("/api/pay/check")
+//                            .setMatchStrategy(SentinelGatewayConstants.URL_MATCH_STRATEGY_EXACT));
+//                }});
 
         definitions.add(api1);
-        definitions.add(api2);
-        definitions.add(api3);
+//        definitions.add(api2);
+//        definitions.add(api3);
         GatewayApiDefinitionManager.loadApiDefinitions(definitions);
     }
 
@@ -64,22 +64,22 @@ public class SentinelConfig {
                 .setGrade(1)  // 1: QPS
                 .setCount(3)
                 .setIntervalSec(3);
-        // 规则2: /order/create 每5秒最多5次
-        GatewayFlowRule rule2 = new GatewayFlowRule("create_order_api")
-                .setResourceMode(SentinelGatewayConstants.RESOURCE_MODE_CUSTOM_API_NAME)
-                .setGrade(1)
-                .setCount(5)
-                .setIntervalSec(5);
-        // 规则3: /api/pay/check 每5秒最多5次
-        GatewayFlowRule rule3 = new GatewayFlowRule("pay_check_api")
-                .setResourceMode(SentinelGatewayConstants.RESOURCE_MODE_CUSTOM_API_NAME)
-                .setGrade(1)
-                .setCount(5)
-                .setIntervalSec(5);
+//        // 规则2: /order/create 每5秒最多5次
+//        GatewayFlowRule rule2 = new GatewayFlowRule("create_order_api")
+//                .setResourceMode(SentinelGatewayConstants.RESOURCE_MODE_CUSTOM_API_NAME)
+//                .setGrade(1)
+//                .setCount(5)
+//                .setIntervalSec(5);
+//        // 规则3: /api/pay/check 每5秒最多5次
+//        GatewayFlowRule rule3 = new GatewayFlowRule("pay_check_api")
+//                .setResourceMode(SentinelGatewayConstants.RESOURCE_MODE_CUSTOM_API_NAME)
+//                .setGrade(1)
+//                .setCount(5)
+//                .setIntervalSec(5);
 
         rules.add(rule1);
-        rules.add(rule2);
-        rules.add(rule3);
+//        rules.add(rule2);
+//        rules.add(rule3);
         GatewayRuleManager.loadRules(rules);
     }
 

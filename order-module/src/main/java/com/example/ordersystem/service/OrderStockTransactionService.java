@@ -1,6 +1,5 @@
 package com.example.ordersystem.service;
 
-import com.example.ordersystem.client.PayClient;
 import com.example.ordersystem.entity.Order;
 import com.example.ordersystem.entity.StockTxLog;
 import com.example.ordersystem.repository.OrderRepository;
@@ -42,9 +41,8 @@ public class OrderStockTransactionService {
     @Autowired
     private GeneSnowflake geneSnowflake;
 
-    // 在 OrderStockTransactionService 中注入 PayClient 和动态配置
     @Autowired
-    private PayClient payClient;
+    private PayCheckService payCheckService;
 
     @Value("${payment.check.enabled:true}")
     private boolean paymentCheckEnabled;
@@ -72,18 +70,18 @@ public class OrderStockTransactionService {
             order.setCreateTime(LocalDateTime.now(ZoneOffset.UTC));
             Order saved = orderRepository.save(order);
 
-            // 2. 扣减库存
-            boolean success = stockService.decreaseStock(userId, quantity);
-            if (!success) {
-                throw new RuntimeException("库存不足");
-            }
-
-            // 3. 支付检查（如果开关开启）
+            // 2. 支付检查（如果开关开启）
             if (paymentCheckEnabled) {
-                boolean paySuccess = payClient.checkPayment(saved.getId(), userId, productName, quantity);
+                boolean paySuccess = payCheckService.doPayCheck(saved.getId(), userId, productName, quantity);
                 if (!paySuccess) {
                     throw new RuntimeException("支付检查失败：商品数量超过限制");
                 }
+            }
+
+            // 3. 扣减库存
+            boolean success = stockService.decreaseStock(userId, quantity);
+            if (!success) {
+                throw new RuntimeException("库存不足或没有取到数据库锁");
             }
 
             // 4. 更新订单状态为正常（下单成功）

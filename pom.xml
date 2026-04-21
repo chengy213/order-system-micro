@@ -57,6 +57,16 @@
                 <artifactId>spring-cloud-starter-alibaba-sentinel</artifactId>
                 <version>${spring-cloud-alibaba.version}</version>
             </dependency>
+            <dependency>
+                <groupId>com.alibaba.csp</groupId>
+                <artifactId>sentinel-core</artifactId>
+                <version>${sentinel.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.alibaba.csp</groupId>
+                <artifactId>sentinel-transport-simple-http</artifactId>
+                <version>${sentinel.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 

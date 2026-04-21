@@ -16,3 +16,7 @@ spring:
         enabled: ${NACOS_ENABLED:false}   # 是否注册到 Nacos（动态控制）
         username: nacos          # 添加用户名
         password: 1234           # 添加密码
+
+feign:
+  sentinel:
+    enabled:  true

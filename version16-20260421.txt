@@ -1,0 +1,53 @@
+Version 16 版本改动日志
+一、版本概述
+Version 16 在 Version 15（稳定版）基础上，强化了系统的流量治理能力，重点实现了：
+- 热点用户限流：针对下单接口 /order/create，基于用户 ID（userId）进行精细化限流（例如 3 秒内最多 3 次）。
+- 熔断降级：对支付检查（payCheck 资源）配置了慢调用比例熔断和异常比例熔断，当支付模块不稳定时自动降级（允许支付），避免订单服务雪崩。
+- 并发测试脚本：提供了支持并发请求的 Shell 脚本，便于压测和验证限流、熔断效果。
+
+版本对比（Version 15 → Version 16）
+功能	                    Version 15	                Version 16
+热点用户限流	            无	                        基于 userId 的 3 秒 3 次限流（Gateway 层）
+熔断降级	                无	                        支付检查接口支持慢调用/异常比例熔断，降级允许支付
+并发测试脚本	            无	                        test_ratelimit.sh 支持并发压测
+依赖	                    无 Sentinel 热点模块	        增加 sentinel-parameter-flow-control
+配置	                    无	                        SentinelDegradeConfig、HotParamLimiterFilter
+
+order-system-micro/
+├── gateway-module/
+│   ├── src/main/java/com/example/gateway/
+│   │   ├── filter/
+│   │   │   ├── GatewayJwtAuthenticationFilter.java   # 重命名并增强（原 JwtAuthenticationFilter）
+│   │   │   └── HotParamLimiterFilter.java            # 新增：热点参数限流过滤器
+│   │   └── config/
+│   │       ├── GatewaySecurityConfig.java            # 新增：公开路径集中管理
+│   │       └── SentinelConfig.java                   # 修改：注释掉部分网关流控（不影响热点限流）
+│   └── pom.xml                                       # 添加 sentinel-parameter-flow-control 依赖
+├── order-module/
+│   ├── src/main/java/com/example/ordersystem/
+│   │   ├── config/
+│   │   │   └── SentinelDegradeConfig.java            # 新增：熔断降级规则配置
+│   │   ├── service/
+│   │   │   └── PayCheckService.java                  # 新增：封装支付检查，使用 @SentinelResource
+│   │   └── (其他文件微调，如 OrderStockTransactionService 注入 PayCheckService)
+│   └── pom.xml                                       # 添加 Sentinel 相关依赖
+└── test_ratelimit.sh                                 # 新增：并发测试脚本（项目根目录）
+
+配置依赖（打开feign的sentinel，放在order module的bootstrap）：
+feign:
+  sentinel:
+    enabled:  true
+
+[如何测试？]
+请跑项目下的test_ratelimit.sh脚本
+
+[限流]
+要达到的效果：实现对热点用户（如 userId=1）的限流（3 秒内最多 3 次下单）
+
+[如何验证限流效果]
+如果在控制台中发现有如下输出就说明限流已生效：Trigger rate limit for userId=
+返回给前端的实际响应：
+429 Too Many Requests，响应体为 Sentinel 配置的 fallback 信息。
+
+[熔断]
+熔断降级规则配置在SentinelDegradeConfig.java，配置了慢调用的降级策略和异常的降级策略（降级策略都是跳过检查）
