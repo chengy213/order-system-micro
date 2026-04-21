@@ -6,6 +6,7 @@ import com.example.ordersystem.entity.StockTxLog;
 import com.example.ordersystem.repository.OrderRepository;
 import com.example.ordersystem.repository.StockTxLogRepository;
 import com.example.ordersystem.util.GeneSnowflake;
+import io.seata.spring.annotation.GlobalTransactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -49,6 +50,9 @@ public class OrderStockTransactionService {
     @Value("${payment.check.enabled:true}")
     private boolean paymentCheckEnabled;
 
+    @Value("${seata.global-transaction.enabled:true}")
+    private boolean globalTxEnabled;
+
     /**
      * 创建订单并扣减库存，同时记录事务日志（原子操作）
      * @param txId 事务ID（雪花算法生成）
@@ -58,7 +62,8 @@ public class OrderStockTransactionService {
      * @return 订单对象
      * @throws RuntimeException 库存不足或其他异常
      */
-    @Transactional(rollbackFor = Exception.class)
+    @GlobalTransactional(name = "create-order-tx", rollbackFor = Exception.class) //启用seata全局事务
+    @Transactional(rollbackFor = Exception.class) // 本地事务与全局事务协同
     public Order createOrderAndDecreaseStock(String txId, Long userId, String productName, Integer quantity) {
         try {
             // 1. 创建订单

@@ -1,0 +1,275 @@
+Version 15 改动日志 – 引入 Seata 分布式事务（当前只是一个半成品，扣库存了但是没加回去！！！）
+[版本概述]
+在 Version 14（Gateway  Sentinel）基础上，引入 Seata 解决跨服务（Order Module → Pay Module）调用时的事务一致性问题。
+场景：用户下单时，Order Module 会创建订单、扣减库存，并通过 Feign 调用 Pay Module 的支付检查接口。
+如果支付检查失败（例如商品数量超过 20），需要回滚订单和库存操作。由于 @Transactional 无法跨越服务边界，必须使用分布式事务。
+
+一、Seata 部署（依赖Seata Server全局协调器）
+
+启动 Seata Server:
+sh /usr/local/seata/bin/seata-server.sh -p 8091
+
+可以登录Seata控制台查看
+http://127.0.0.1:7091/#/transaction/list
+
+二、版本改动摘要（Version 15）
+模块                       变更内容
+父 pom                 添加 Seata 依赖管理
+order-module           添加 Seata 依赖；配置 application.yml；OrderStockTransactionService 添加 @GlobalTransactional
+pay-module             添加 Seata 依赖；配置 application.yml（数据源代理）
+数据库                  每个业务库增加 undo_log 表；Seata Server 需要独立数据库
+
+三、成功的seata事务日志
+
+o.s.o.j.s.OpenEntityManagerInViewInterceptor - Opening JPA EntityManager in OpenEntityManagerInViewInterceptor
+i.s.i.h.TransactionPropagationInterceptor - xid in RootContext[null] xid in HttpContext[null]
+Hibernate: select stl1_0.tx_id,stl1_0.amount,stl1_0.create_time,stl1_0.operation,stl1_0.order_id,stl1_0.status,stl1_0.user_id from stock_tx_log stl1_0 where stl1_0.tx_id=?
+i.s.c.l.EnhancedServiceLoader$InnerEnhancedServiceLoader - Load [io.seata.core.model.TransactionManager] class fail: no service files found in 'META-INF/seata/'.
+i.seata.tm.TransactionManagerHolder - TransactionManager Singleton io.seata.tm.DefaultTransactionManager@39086423
+i.s.c.r.netty.AbstractNettyRemoting - io.seata.core.rpc.netty.TmNettyRemotingClient@128761ad msgId:12, body:GlobalBeginResponse{xid='192.168.1.229:8091:3945924402078216303', extraData='null', resultCode=Success, msg='null'}
+io.seata.core.context.RootContext - bind 192.168.1.229:8091:3945924402078216303
+i.s.tm.api.DefaultGlobalTransaction - Begin new global transaction [192.168.1.229:8091:3945924402078216303]
+DEBUG o.s.orm.jpa.JpaTransactionManager - Found thread-bound EntityManager [SessionImpl(520743260<open>)] for JPA transaction
+DEBUG o.s.orm.jpa.JpaTransactionManager - Creating new transaction with name [com.example.ordersystem.service.OrderStockTransactionService.createOrderAndDecreaseStock]: PROPAGATION_REQUIRED,ISOLATION_DEFAULT,-java.lang.Exception
+DEBUG o.s.orm.jpa.JpaTransactionManager - Exposing JPA transaction as JDBC [org.springframework.orm.jpa.vendor.HibernateJpaDialect$HibernateConnectionHandle@4debdb8b]
+DEBUG o.s.orm.jpa.JpaTransactionManager - Found thread-bound EntityManager [SessionImpl(520743260<open>)] for JPA transaction
+DEBUG o.s.orm.jpa.JpaTransactionManager - Participating in existing transaction
+Hibernate: select o1_0.id,o1_0.create_time,o1_0.order_no,o1_0.product_name,o1_0.quantity,o1_0.status,o1_0.user_id from t_order o1_0 where o1_0.id=?
+o.s.orm.jpa.JpaTransactionManager - Found thread-bound EntityManager [SessionImpl(520743260<open>)] for JPA transaction
+o.s.orm.jpa.JpaTransactionManager - Participating in existing transaction
+Hibernate: select u1_0.id,u1_0.available_stock,u1_0.password,u1_0.username,u1_0.version from t_user u1_0 where u1_0.id=?
+Hibernate: update t_user u1_0 set available_stock=(u1_0.available_stock-?),version=(u1_0.version+1) where u1_0.id=? and u1_0.available_stock>=? and u1_0.version=?
+o.s.orm.jpa.JpaTransactionManager - Found thread-bound EntityManager [SessionImpl(520743260<open>)] for JPA transaction
+o.s.orm.jpa.JpaTransactionManager - Participating in existing transaction
+o.s.orm.jpa.JpaTransactionManager - Found thread-bound EntityManager [SessionImpl(520743260<open>)] for JPA transaction
+o.s.orm.jpa.JpaTransactionManager - Participating in existing transaction
+Hibernate: select stl1_0.tx_id,stl1_0.amount,stl1_0.create_time,stl1_0.operation,stl1_0.order_id,stl1_0.status,stl1_0.user_id from stock_tx_log stl1_0 where stl1_0.tx_id=?
+c.e.o.s.OrderStockTransactionService - 创建订单并扣减库存成功: txId=609573280680017921, userId=1, orderId=609573284270342145, quantity=1
+o.s.orm.jpa.JpaTransactionManager - Initiating transaction commit
+o.s.orm.jpa.JpaTransactionManager - Committing JPA transaction on EntityManager [SessionImpl(520743260<open>)]
+Hibernate: insert into t_order (create_time,order_no,product_name,quantity,status,user_id,id) values (?,?,?,?,?,?,?)
+Hibernate: insert into stock_tx_log (amount,create_time,operation,order_id,status,user_id,tx_id) values (?,?,?,?,?,?,?)
+Hibernate: update t_order set create_time=?,order_no=?,product_name=?,quantity=?,status=?,user_id=? where id=?
+o.s.orm.jpa.JpaTransactionManager - Not closing pre-bound JPA EntityManager after transaction
+i.s.tm.api.DefaultGlobalTransaction - transaction 192.168.1.229:8091:3945924402078216303 will be commit
+i.s.c.r.netty.AbstractNettyRemoting - io.seata.core.rpc.netty.TmNettyRemotingClient@128761ad msgId:13, body:GlobalCommitResponse{globalStatus=Committed, resultCode=Success, msg='null'}
+i.s.tm.api.DefaultGlobalTransaction - transaction end, xid = 192.168.1.229:8091:3945924402078216303
+io.seata.core.context.RootContext - unbind 192.168.1.229:8091:3945924402078216303
+i.s.tm.api.DefaultGlobalTransaction - [192.168.1.229:8091:3945924402078216303] commit status: Committed
+c.e.o.m.r.StockTransactionMessagePublisher - 创建订单事务消息已提交: txId=609573280680017921, userId=1, sendStatus=SEND_OK
+c.e.o.m.r.RocketMQEventPublisher - RocketMQ 消息发送成功: messageId=609573294328283137, partitionKey=1, topic=order-operations
+c.e.o.aop.OperationLogAspect - 操作日志已发送: operation=CREATE_ORDER, userId=1, trackingId=609048911495069696
+o.s.o.j.SharedEntityManagerCreator$SharedEntityManagerInvocationHandler - Creating new EntityManager for shared EntityManager invocation
+o.s.o.j.s.OpenEntityManagerInViewInterceptor - Closing JPA EntityManager in OpenEntityManagerInViewInterceptor
+
+四、失败回滚的seata全局性事务日志
+
+o.s.o.j.s.OpenEntityManagerInViewInterceptor - Opening JPA EntityManager in OpenEntityManagerInViewInterceptor
+i.s.i.h.TransactionPropagationInterceptor - xid in RootContext[null] xid in HttpContext[null]
+Hibernate: select stl1_0.tx_id,stl1_0.amount,stl1_0.create_time,stl1_0.operation,stl1_0.order_id,stl1_0.status,stl1_0.user_id from stock_tx_log stl1_0 where stl1_0.tx_id=?
+i.s.c.r.netty.AbstractNettyRemoting - io.seata.core.rpc.netty.TmNettyRemotingClient@128761ad msgId:23, body:GlobalBeginResponse{xid='192.168.1.229:8091:3945924402078216311', extraData='null', resultCode=Success, msg='null'}
+io.seata.core.context.RootContext - bind 192.168.1.229:8091:3945924402078216311
+i.s.tm.api.DefaultGlobalTransaction - Begin new global transaction [192.168.1.229:8091:3945924402078216311]
+o.s.orm.jpa.JpaTransactionManager - Found thread-bound EntityManager [SessionImpl(535717071<open>)] for JPA transaction
+o.s.orm.jpa.JpaTransactionManager - Creating new transaction with name [com.example.ordersystem.service.OrderStockTransactionService.createOrderAndDecreaseStock]: PROPAGATION_REQUIRED,ISOLATION_DEFAULT,-java.lang.Exception
+o.s.orm.jpa.JpaTransactionManager - Exposing JPA transaction as JDBC [org.springframework.orm.jpa.vendor.HibernateJpaDialect$HibernateConnectionHandle@79b5b105]
+o.s.orm.jpa.JpaTransactionManager - Found thread-bound EntityManager [SessionImpl(535717071<open>)] for JPA transaction
+o.s.orm.jpa.JpaTransactionManager - Participating in existing transaction
+Hibernate: select o1_0.id,o1_0.create_time,o1_0.order_no,o1_0.product_name,o1_0.quantity,o1_0.status,o1_0.user_id from t_order o1_0 where o1_0.id=?
+o.s.orm.jpa.JpaTransactionManager - Found thread-bound EntityManager [SessionImpl(535717071<open>)] for JPA transaction
+o.s.orm.jpa.JpaTransactionManager - Participating in existing transaction
+Hibernate: select u1_0.id,u1_0.available_stock,u1_0.password,u1_0.username,u1_0.version from t_user u1_0 where u1_0.id=?
+Hibernate: update t_user u1_0 set available_stock=(u1_0.available_stock-?),version=(u1_0.version+1) where u1_0.id=? and u1_0.available_stock>=? and u1_0.version=?
+o.s.orm.jpa.JpaTransactionManager - Initiating transaction rollback
+o.s.orm.jpa.JpaTransactionManager - Rolling back JPA transaction on EntityManager [SessionImpl(535717071<open>)]
+o.s.orm.jpa.JpaTransactionManager - Not closing pre-bound JPA EntityManager after transaction
+2026-04-21 09:14:42.786 [http-nio-8082-exec-1] INFO  i.s.tm.api.DefaultGlobalTransaction - transaction 192.168.1.229:8091:3945924402078216311 will be rollback
+i.s.c.r.netty.AbstractNettyRemoting - io.seata.core.rpc.netty.TmNettyRemotingClient@128761ad msgId:24, body:GlobalRollbackResponse{globalStatus=Rollbacked, resultCode=Success, msg='null'}
+i.s.tm.api.DefaultGlobalTransaction - transaction end, xid = 192.168.1.229:8091:3945924402078216311
+o.seata.core.context.RootContext - unbind 192.168.1.229:8091:3945924402078216311
+i.s.tm.api.DefaultGlobalTransaction - [192.168.1.229:8091:3945924402078216311] rollback status: Rollbacked
+ERROR c.e.o.c.StockTransactionListener - 本地事务执行失败
+java.lang.RuntimeException: try to proceed invocation error
+	at io.seata.spring.annotation.AdapterInvocationWrapper.proceed(AdapterInvocationWrapper.java:59)
+	at io.seata.integration.tx.api.interceptor.handler.GlobalTransactionalInterceptorHandler$2.execute(GlobalTransactionalInterceptorHandler.java:200)
+	at io.seata.tm.api.TransactionalTemplate.execute(TransactionalTemplate.java:128)
+	at io.seata.integration.tx.api.interceptor.handler.GlobalTransactionalInterceptorHandler.handleGlobalTransaction(GlobalTransactionalInterceptorHandler.java:197)
+	at io.seata.integration.tx.api.interceptor.handler.GlobalTransactionalInterceptorHandler.doInvoke(GlobalTransactionalInterceptorHandler.java:166)
+	at io.seata.integration.tx.api.interceptor.handler.AbstractProxyInvocationHandler.invoke(AbstractProxyInvocationHandler.java:35)
+	at io.seata.spring.annotation.AdapterSpringSeataInterceptor.invoke(AdapterSpringSeataInterceptor.java:45)
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:184)
+	at org.springframework.aop.framework.CglibAopProxy$CglibMethodInvocation.proceed(CglibAopProxy.java:768)
+	at org.springframework.aop.framework.CglibAopProxy$DynamicAdvisedInterceptor.intercept(CglibAopProxy.java:720)
+	at com.example.ordersystem.service.OrderStockTransactionService$$SpringCGLIB$$0.createOrderAndDecreaseStock(<generated>)
+	at com.example.ordersystem.config.StockTransactionListener.executeLocalTransaction(StockTransactionListener.java:48)
+	at org.apache.rocketmq.spring.support.RocketMQUtil$1.executeLocalTransaction(RocketMQUtil.java:63)
+	at org.apache.rocketmq.client.impl.producer.DefaultMQProducerImpl.sendMessageInTransaction(DefaultMQProducerImpl.java:1421)
+	at org.apache.rocketmq.client.producer.TransactionMQProducer.sendMessageInTransaction(TransactionMQProducer.java:94)
+	at org.apache.rocketmq.spring.core.RocketMQTemplate.sendMessageInTransaction(RocketMQTemplate.java:1182)
+	at com.example.ordersystem.messaging.rocketmq.StockTransactionMessagePublisher.sendCreateOrderTransaction(StockTransactionMessagePublisher.java:73)
+	at com.example.ordersystem.controller.OrderController.createOrder(OrderController.java:62)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:568)
+	at org.springframework.aop.support.AopUtils.invokeJoinpointUsingReflection(AopUtils.java:355)
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.invokeJoinpoint(ReflectiveMethodInvocation.java:196)
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:163)
+	at org.springframework.aop.framework.CglibAopProxy$CglibMethodInvocation.proceed(CglibAopProxy.java:768)
+	at org.springframework.aop.framework.adapter.AfterReturningAdviceInterceptor.invoke(AfterReturningAdviceInterceptor.java:57)
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:184)
+	at org.springframework.aop.framework.CglibAopProxy$CglibMethodInvocation.proceed(CglibAopProxy.java:768)
+	at org.springframework.aop.interceptor.ExposeInvocationInterceptor.invoke(ExposeInvocationInterceptor.java:97)
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:184)
+	at org.springframework.aop.framework.CglibAopProxy$CglibMethodInvocation.proceed(CglibAopProxy.java:768)
+	at org.springframework.aop.framework.CglibAopProxy$DynamicAdvisedInterceptor.intercept(CglibAopProxy.java:720)
+	at com.example.ordersystem.controller.OrderController$$SpringCGLIB$$0.createOrder(<generated>)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:568)
+	at org.springframework.web.method.support.InvocableHandlerMethod.doInvoke(InvocableHandlerMethod.java:255)
+	at org.springframework.web.method.support.InvocableHandlerMethod.invokeForRequest(InvocableHandlerMethod.java:188)
+	at org.springframework.web.servlet.mvc.method.annotation.ServletInvocableHandlerMethod.invokeAndHandle(ServletInvocableHandlerMethod.java:118)
+	at org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.invokeHandlerMethod(RequestMappingHandlerAdapter.java:926)
+	at org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.handleInternal(RequestMappingHandlerAdapter.java:831)
+	at org.springframework.web.servlet.mvc.method.AbstractHandlerMethodAdapter.handle(AbstractHandlerMethodAdapter.java:87)
+	at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1089)
+	at org.springframework.web.servlet.DispatcherServlet.doService(DispatcherServlet.java:979)
+	at org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1014)
+	at org.springframework.web.servlet.FrameworkServlet.doPost(FrameworkServlet.java:914)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:590)
+	at org.springframework.web.servlet.FrameworkServlet.service(FrameworkServlet.java:885)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:658)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:195)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at org.apache.tomcat.websocket.server.WsFilter.doFilter(WsFilter.java:51)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:110)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:110)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at com.alibaba.druid.support.jakarta.WebStatFilter.doFilter(WebStatFilter.java:113)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at org.springframework.web.filter.CompositeFilter$VirtualFilterChain.doFilter(CompositeFilter.java:108)
+	at org.springframework.security.web.FilterChainProxy.lambda$doFilterInternal$3(FilterChainProxy.java:231)
+	at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter(FilterChainProxy.java:365)
+	at org.springframework.security.web.access.intercept.AuthorizationFilter.doFilter(AuthorizationFilter.java:100)
+	at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter(FilterChainProxy.java:374)
+	at org.springframework.security.web.access.ExceptionTranslationFilter.doFilter(ExceptionTranslationFilter.java:126)
+	at org.springframework.security.web.access.ExceptionTranslationFilter.doFilter(ExceptionTranslationFilter.java:120)
+	at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter(FilterChainProxy.java:374)
+	at org.springframework.security.web.session.SessionManagementFilter.doFilter(SessionManagementFilter.java:131)
+	at org.springframework.security.web.session.SessionManagementFilter.doFilter(SessionManagementFilter.java:85)
+	at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter(FilterChainProxy.java:374)
+	at org.springframework.security.web.authentication.AnonymousAuthenticationFilter.doFilter(AnonymousAuthenticationFilter.java:100)
+	at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter(FilterChainProxy.java:374)
+	at org.springframework.security.web.servletapi.SecurityContextHolderAwareRequestFilter.doFilter(SecurityContextHolderAwareRequestFilter.java:179)
+	at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter(FilterChainProxy.java:374)
+	at org.springframework.security.web.savedrequest.RequestCacheAwareFilter.doFilter(RequestCacheAwareFilter.java:63)
+	at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter(FilterChainProxy.java:374)
+	at com.example.ordersystem.security.JwtAuthenticationFilter.doFilterInternal(JwtAuthenticationFilter.java:90)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter(FilterChainProxy.java:374)
+	at com.example.ordersystem.filter.TrackingIdFilter.doFilterInternal(TrackingIdFilter.java:69)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter(FilterChainProxy.java:374)
+	at org.springframework.security.web.authentication.logout.LogoutFilter.doFilter(LogoutFilter.java:107)
+	at org.springframework.security.web.authentication.logout.LogoutFilter.doFilter(LogoutFilter.java:93)
+	at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter(FilterChainProxy.java:374)
+	at org.springframework.security.web.header.HeaderWriterFilter.doHeadersAfter(HeaderWriterFilter.java:90)
+	at org.springframework.security.web.header.HeaderWriterFilter.doFilterInternal(HeaderWriterFilter.java:75)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter(FilterChainProxy.java:374)
+	at org.springframework.security.web.context.SecurityContextHolderFilter.doFilter(SecurityContextHolderFilter.java:82)
+	at org.springframework.security.web.context.SecurityContextHolderFilter.doFilter(SecurityContextHolderFilter.java:69)
+	at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter(FilterChainProxy.java:374)
+	at org.springframework.security.web.context.request.async.WebAsyncManagerIntegrationFilter.doFilterInternal(WebAsyncManagerIntegrationFilter.java:62)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter(FilterChainProxy.java:374)
+	at org.springframework.security.web.session.DisableEncodeUrlFilter.doFilterInternal(DisableEncodeUrlFilter.java:42)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.springframework.security.web.FilterChainProxy$VirtualFilterChain.doFilter(FilterChainProxy.java:374)
+	at org.springframework.security.web.FilterChainProxy.doFilterInternal(FilterChainProxy.java:233)
+	at org.springframework.security.web.FilterChainProxy.doFilter(FilterChainProxy.java:191)
+	at org.springframework.web.filter.CompositeFilter$VirtualFilterChain.doFilter(CompositeFilter.java:113)
+	at org.springframework.web.servlet.handler.HandlerMappingIntrospector.lambda$createCacheFilter$3(HandlerMappingIntrospector.java:195)
+	at org.springframework.web.filter.CompositeFilter$VirtualFilterChain.doFilter(CompositeFilter.java:113)
+	at org.springframework.web.filter.CompositeFilter.doFilter(CompositeFilter.java:74)
+	at org.springframework.security.config.annotation.web.configuration.WebMvcSecurityConfiguration$CompositeFilterChainProxy.doFilter(WebMvcSecurityConfiguration.java:230)
+	at org.springframework.web.filter.DelegatingFilterProxy.invokeDelegate(DelegatingFilterProxy.java:362)
+	at org.springframework.web.filter.DelegatingFilterProxy.doFilter(DelegatingFilterProxy.java:278)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at org.springframework.web.filter.RequestContextFilter.doFilterInternal(RequestContextFilter.java:100)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at org.springframework.web.filter.FormContentFilter.doFilterInternal(FormContentFilter.java:93)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at org.springframework.web.filter.CharacterEncodingFilter.doFilterInternal(CharacterEncodingFilter.java:201)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at org.springframework.web.filter.ForwardedHeaderFilter.doFilterInternal(ForwardedHeaderFilter.java:173)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperValve.java:167)
+	at org.apache.catalina.core.StandardContextValve.invoke(StandardContextValve.java:90)
+	at org.apache.catalina.authenticator.AuthenticatorBase.invoke(AuthenticatorBase.java:483)
+	at org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.java:115)
+	at org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.java:93)
+	at org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve.java:74)
+	at org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:344)
+	at org.apache.coyote.http11.Http11Processor.service(Http11Processor.java:397)
+	at org.apache.coyote.AbstractProcessorLight.process(AbstractProcessorLight.java:63)
+	at org.apache.coyote.AbstractProtocol$ConnectionHandler.process(AbstractProtocol.java:905)
+	at org.apache.tomcat.util.net.NioEndpoint$SocketProcessor.doRun(NioEndpoint.java:1741)
+	at org.apache.tomcat.util.net.SocketProcessorBase.run(SocketProcessorBase.java:52)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1190)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:659)
+	at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:63)
+	at java.base/java.lang.Thread.run(Thread.java:842)
+Caused by: java.lang.RuntimeException: 支付检查失败：商品数量超过限制
+	at com.example.ordersystem.service.OrderStockTransactionService.createOrderAndDecreaseStock(OrderStockTransactionService.java:90)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:568)
+	at org.springframework.aop.support.AopUtils.invokeJoinpointUsingReflection(AopUtils.java:355)
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.invokeJoinpoint(ReflectiveMethodInvocation.java:196)
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:163)
+	at org.springframework.aop.framework.CglibAopProxy$CglibMethodInvocation.proceed(CglibAopProxy.java:768)
+	at org.springframework.transaction.interceptor.TransactionAspectSupport.invokeWithinTransaction(TransactionAspectSupport.java:379)
+	at org.springframework.transaction.interceptor.TransactionInterceptor.invoke(TransactionInterceptor.java:119)
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:184)
+	at org.springframework.aop.framework.CglibAopProxy$CglibMethodInvocation.proceed(CglibAopProxy.java:768)
+	at io.seata.spring.annotation.AdapterInvocationWrapper.proceed(AdapterInvocationWrapper.java:57)
+	... 146 common frames omitted
+c.e.o.m.r.StockTransactionMessagePublisher - 创建订单事务消息已回滚: txId=609573992143028225, userId=1, sendStatus=SEND_OK
+o.s.o.j.s.OpenEntityManagerInViewInterceptor - Closing JPA EntityManager in OpenEntityManagerInViewInterceptor
+o.s.security.web.FilterChainProxy - Securing GET /orders
+o.s.s.w.a.s.ChangeSessionIdAuthenticationStrategy - Changed session id from 4D5E061B8B17E72D4FD6BCE16DFAFE0B
+o.s.security.web.FilterChainProxy - Secured GET /orders
+o.s.o.j.s.OpenEntityManagerInViewInterceptor - Opening JPA EntityManager in OpenEntityManagerInViewInterceptor
+i.s.i.h.TransactionPropagationInterceptor - xid in RootContext[null] xid in HttpContext[null]
+Hibernate: select o1_0.id,o1_0.create_time,o1_0.order_no,o1_0.product_name,o1_0.quantity,o1_0.status,o1_0.user_id from t_order o1_0 where o1_0.user_id=? order by o1_0.create_time desc
+o.s.orm.jpa.JpaTransactionManager - Found thread-bound EntityManager [SessionImpl(1876267470<open>)] for JPA transaction
+o.s.orm.jpa.JpaTransactionManager - Creating new transaction with name [org.springframework.data.jpa.repository.support.SimpleJpaRepository.findById]: PROPAGATION_REQUIRED,ISOLATION_DEFAULT,readOnly
+o.s.orm.jpa.JpaTransactionManager - Exposing JPA transaction as JDBC [org.springframework.orm.jpa.vendor.HibernateJpaDialect$HibernateConnectionHandle@4beea93c]
+Hibernate: select u1_0.id,u1_0.available_stock,u1_0.password,u1_0.username,u1_0.version from t_user u1_0 where u1_0.id=?
+o.s.orm.jpa.JpaTransactionManager - Initiating transaction commit
+o.s.orm.jpa.JpaTransactionManager - Committing JPA transaction on EntityManager [SessionImpl(1876267470<open>)]
+o.s.orm.jpa.JpaTransactionManager - Not closing pre-bound JPA EntityManager after transaction
+o.s.o.j.s.OpenEntityManagerInViewInterceptor - Closing JPA EntityManager in OpenEntityManagerInViewInterceptor
+i.s.c.r.n.AbstractNettyRemotingClient - will send ping msg,channel [id: 0xa0722ef1, L:/127.0.0.1:56352 - R:/127.0.0.1:8091]
+i.s.c.r.netty.AbstractNettyRemoting - write message:services ping, channel:[id: 0xa0722ef1, L:/127.0.0.1:56352 - R:/127.0.0.1:8091],active?true,writable?true,isopen?true
+i.s.c.r.netty.AbstractNettyRemoting - io.seata.core.rpc.netty.RmNettyRemotingClient@e006ae0 msgId:20, body:services pong
+i.s.c.r.p.c.ClientHeartbeatProcessor - received PONG from /127.0.0.1:8091

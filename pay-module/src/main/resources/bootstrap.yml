@@ -16,3 +16,21 @@ server:
 # 关键配置, 这个配置会让所有 redirect: 语句生成的 URL 变成相对于当前 Servlet 上下文的路径
 spring.mvc:
   redirect-context-relative: true
+
+seata:
+  enabled: true
+  enable-auto-data-source-proxy: true
+  data-source-proxy-mode: AT   # 默认就是 AT，无需额外配置
+  application-id: pay-module-seata
+  global-transaction:
+    enabled: ${SEATA_GLOBAL_TX_ENABLED:true}   # 分布式事务开关（默认 true）
+  tx-service-group: order-service-group
+  service:
+    vgroup-mapping:
+      order-service-group: default
+    grouplist:
+      default: localhost:8091
+  registry:
+    type: file
+  config:
+    type: file

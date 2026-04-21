@@ -1,5 +1,6 @@
 package com.example.pay.controller;
 
+import io.seata.spring.annotation.GlobalTransactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -20,6 +21,7 @@ public class PayController {
      * @return true=允许支付，false=不允许
      */
     @PostMapping("/check")
+    @GlobalTransactional
     public boolean checkPayment(@RequestParam("orderId") Long orderId,
                                 @RequestParam("userId") Long userId,
                                 @RequestParam("productName") String productName,

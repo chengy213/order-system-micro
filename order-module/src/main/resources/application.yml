@@ -98,6 +98,7 @@ logging:
     org.springframework.security: DEBUG
     com.example.ordersystem.security: DEBUG
     org.springframework.orm.jpa:  DEBUG
+    io.seata: DEBUG
 
 # 雪花算法配置
 snowflake:
@@ -160,3 +161,21 @@ payment:
 pay:
   service:
     url: http://localhost:8081   # 非 Nacos 模式下的直连地址
+
+seata:
+  enabled: true
+  enable-auto-data-source-proxy: true
+  data-source-proxy-mode: AT   # 默认就是 AT，无需额外配置
+  application-id: order-module-seata
+  global-transaction:
+    enabled: ${SEATA_GLOBAL_TX_ENABLED:true}   # 分布式事务开关（默认 true）
+  tx-service-group: order-service-group
+  service:
+    vgroup-mapping:
+      order-service-group: default
+    grouplist:
+      default: localhost:8091
+  registry:
+    type: file
+  config:
+    type: file
