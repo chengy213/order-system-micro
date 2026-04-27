@@ -33,21 +33,30 @@ order-system-micro/
 - 无开关设计：接口始终可用，若无数据则返回 0；Flink 作业独立运行，不影响主应用启动。
 
 [部署与测试]
-1. 打包 Flink 作业：
+
+1. 依赖：需要flink server启动
+/usr/local/flink/flink-1.19.2/bin/start-cluster.sh
+flink的控制台(默认8081端口)：http://localhost:8081
+
+注意：order-module项目不依赖flink server启动，两者不直接相关，只是通过kafka stream的Kafka source数据间接关联。
+
+2. 打包 Flink 作业：
 cd /order-system-micro
 构建 flink-module命令：mvn clean package -pl flink-module -am -DskipTests
 
-2. 提交作业到 Flink 集群：
+3. 提交作业到 Flink 集群：
 /usr/local/flink/flink-1.19.2/bin/flink run \
   -c com.example.flink.OrderStatisticsFlinkJob \
   ./flink-module/target/flink-module-1.0.0-jar-with-dependencies.jar
 
+预期输出：Job has been submitted with JobID b2ac16888a668af74a8296e70ad69fc3
+
 然后可以到flink的控制台查看正在运行中的任务：http://localhost:8081/#/job/running
 注意：8081端口留给flink使用了，所以把之前pay-module的8081端口改为8083端口
 
-3. 启动 order-module（Spring Boot 应用）。
+4. 启动 order-module（Spring Boot 应用）。
 
-4. 访问 http://localhost:8080/admin/statistics 获取数据。
+5. 访问 http://localhost:8080/admin/statistics 获取数据。
 //每1分钟刷新一次
 # 获取最近15分钟的统计数据
 curl http://localhost:8080/admin/statistics?window=15min

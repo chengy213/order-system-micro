@@ -18,7 +18,7 @@ import org.apache.flink.streaming.api.windowing.time.Time;
  * - 分别统计 CREATE_ORDER 和 CANCEL_ORDER 的数量。
  * - 使用滑动窗口：
  *     1) 15分钟窗口，步长1分钟（输出最近15分钟的累计值，每1分钟更新一次）
- *     2) 1小时窗口，步长5分钟（输出最近1小时的累计值，每5分钟更新一次）
+ *     2) 1小时窗口，步长3分钟（输出最近1小时的累计值，每3分钟更新一次）
  * - 结果写入 Redis，供订单系统查询接口读取。
  *
  * 注意：该作业独立于 Spring Boot 应用运行，通过 Flink 集群提交。
