@@ -4,6 +4,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -64,5 +65,30 @@ public class RedisCacheManager {
      */
     public static String getUserOrdersKey(Long userId) {
         return RedisKeyConstants.USER_ORDERS_PREFIX + userId;
+    }
+
+    /**
+     * 根据 key 模式获取最新的一个数值（假设 key 末尾为时间戳，字典序最大即最新）
+     */
+    public Long getLatestValueByPattern(String pattern) {
+        Set<String> keys = redisTemplate.keys(pattern);
+        if (keys == null || keys.isEmpty()) {
+            return null;
+        }
+        String latestKey = keys.stream().max(String::compareTo).orElse(null);
+        if (latestKey == null) {
+            return null;
+        }
+        Object value = get(latestKey);
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        } else if (value instanceof String) {
+            try {
+                return Long.parseLong((String) value);
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return null;
     }
 }

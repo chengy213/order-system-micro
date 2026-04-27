@@ -4,6 +4,7 @@ import com.example.ordersystem.entity.User;
 import com.example.ordersystem.repository.UserRepository;
 import com.example.ordersystem.service.StockService;
 import com.example.ordersystem.util.GeneSnowflake;
+import com.example.ordersystem.util.RedisCacheManager;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,6 +33,9 @@ public class AdminController {
 
     @PersistenceContext
     private EntityManager entityManager;
+
+    @Autowired
+    private RedisCacheManager redisCacheManager;
 
     @Value("${snowflake.datacenter-id:1}")
     private long datacenterId;
@@ -84,5 +88,21 @@ public class AdminController {
     public String setStock(@PathVariable Long userId, @RequestParam int stock) {
         stockService.setStock(userId, stock);
         return "OK";
+    }
+
+    @GetMapping("/statistics")
+    public Map<String, Object> getStatistics(@RequestParam(defaultValue = "15min") String window) {
+        if (!"15min".equals(window) && !"1hour".equals(window)) {
+            return Map.of("error", "Invalid window parameter. Supported: 15min, 1hour");
+        }
+        String createPattern = "stats:CREATE_ORDER:" + window + ":*";
+        String cancelPattern = "stats:CANCEL_ORDER:" + window + ":*";
+        Long createCount = redisCacheManager.getLatestValueByPattern(createPattern);
+        Long cancelCount = redisCacheManager.getLatestValueByPattern(cancelPattern);
+        return Map.of(
+                "window", window,
+                "createCount", createCount != null ? createCount : 0,
+                "cancelCount", cancelCount != null ? cancelCount : 0
+        );
     }
 }

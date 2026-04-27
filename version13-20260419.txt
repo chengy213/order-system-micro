@@ -4,7 +4,7 @@ Version 13 改动日志 – 微服务拆分与 Feign 集成
 
 在 Version 12（单体应用集成 Nacos）基础上，将原 order-system-jwt 单体应用拆分为两个独立的微服务模块：
     - Order Module（订单模块）：保留原有全部业务功能（用户认证、订单、库存、事务消息、ES日志等），端口 8080。
-    - Pay Module（支付模块）：新增支付检查服务，提供商品数量校验接口，端口 8081。
+    - Pay Module（支付模块）：新增支付检查服务，提供商品数量校验接口，端口 8083。
 
 两个模块均支持通过 -DNACOS_ENABLED=true 注册到 Nacos，实现服务发现与负载均衡；Order Module 通过 OpenFeign 调用 Pay Module 的支付检查接口，
 并新增 支付开关 动态配置，控制下单时是否进行支付检查。支付检查规则：商品数量 ≤ 20 允许支付。
@@ -21,7 +21,7 @@ payment:
     enabled: true   # 是否启用支付检查（可动态刷新）
 pay:
   service:
-    url: http://localhost:8081   # 非 Nacos 模式下的直连地址
+    url: http://localhost:8083   # 非 Nacos 模式下的直连地址
 
 [版本功能对比]
 功能	            Version 12（单体）	    Version 13（微服务）

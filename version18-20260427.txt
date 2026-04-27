@@ -1,0 +1,64 @@
+Version 18 发布日期：2026-04-27
+核心价值：实现订单操作（下单/取消）的实时统计，为运营监控提供实时数据支持，并为后续复杂事件处理（CEP）奠定基础。
+
+[版本概述]
+Version 18 引入 Flink 实时计算能力，实现对订单创建（CREATE_ORDER）和订单取消（CANCEL_ORDER）事件的实时统计，
+窗口大小分别为 15分钟滑动窗口（步长1分钟）和 1小时滑动窗口（步长3分钟）。统计结果存入 Redis，
+并通过 /admin/statistics HTTP 接口对外提供查询。Flink 作业独立于 Spring Boot 应用运行，
+通过 Kafka 消费事件，降低了对业务代码的侵入。
+
+新增模块 flink-module
+在 order-system-micro 父工程下创建 flink-module 子模块。
+
+order-system-micro/
+├── flink-module/
+│   ├── pom.xml
+│   └── src/main/java/com/example/flink/
+│       ├── OrderStatisticsFlinkJob.java      # 主类
+│       ├── JsonToEventMapFunction.java
+│       ├── RedisWindowSink.java
+├── order-module/ (已有)
+├── pay-module/ (已有)
+├── gateway-module/ (已有)
+└── pom.xml (父)
+
+[功能特性]
+
+- 实时统计：Flink 消费 Kafka topic order-operations，解析 operation 字段。
+- 滑动窗口：
+    - 15分钟窗口（步长1分钟） → 每1分钟输出最近15分钟的累计值。
+    - 1小时窗口（步长3分钟） → 每3分钟输出最近1小时的累计值。
+- 结果存储：Redis key 格式 stats:{CREATE_ORDER|CANCEL_ORDER}:{15min|1hour}:{windowEndTimestamp}，值 = 计数，过期时间 1 小时。
+- 查询接口：GET /admin/statistics?window=15min 或 window=1hour，返回 createCount 和 cancelCount。
+- 无开关设计：接口始终可用，若无数据则返回 0；Flink 作业独立运行，不影响主应用启动。
+
+[部署与测试]
+1. 打包 Flink 作业：
+cd /order-system-micro
+构建 flink-module命令：mvn clean package -pl flink-module -am -DskipTests
+
+2. 提交作业到 Flink 集群：
+/usr/local/flink/flink-1.19.2/bin/flink run \
+  -c com.example.flink.OrderStatisticsFlinkJob \
+  ./flink-module/target/flink-module-1.0.0-jar-with-dependencies.jar
+
+然后可以到flink的控制台查看正在运行中的任务：http://localhost:8081/#/job/running
+注意：8081端口留给flink使用了，所以把之前pay-module的8081端口改为8083端口
+
+3. 启动 order-module（Spring Boot 应用）。
+
+4. 访问 http://localhost:8080/admin/statistics 获取数据。
+//每1分钟刷新一次
+# 获取最近15分钟的统计数据
+curl http://localhost:8080/admin/statistics?window=15min
+{"createCount":3,"window":"15min","cancelCount":5}
+
+//每3分钟刷新一次
+# 获取最近1小时的统计数据
+curl http://localhost:8080/admin/statistics?window=1hour
+{"createCount":3,"window":"1hour","cancelCount":4}
+
+[注意事项]
+- Kafka 中消息的 operationLog.operation 字段必须为 CREATE_ORDER 或 CANCEL_ORDER。
+- Redis 地址硬编码为 localhost:6379，生产环境请修改为配置中心或环境变量。
+- Flink 作业的并行度当前为 1，可根据 Kafka 分区数调整。

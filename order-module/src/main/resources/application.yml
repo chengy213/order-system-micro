@@ -159,7 +159,7 @@ payment:
     enabled: true   # 是否启用支付检查（可动态刷新）
 pay:
   service:
-    url: http://localhost:8081   # 非 Nacos 模式下的直连地址
+    url: http://localhost:8083   # 非 Nacos 模式下的直连地址
 
 management:
   endpoints:

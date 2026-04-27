@@ -29,6 +29,7 @@
         <module>order-module</module>
         <module>pay-module</module>
         <module>gateway-module</module>
+        <module>flink-module</module>
     </modules>
 
     <dependencyManagement>
