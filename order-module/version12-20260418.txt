@@ -39,8 +39,8 @@ java -DNACOS_ENABLED=true -jar order-system.jar
 
 Q1: 如何登录到nacos控制台？
 访问vim /Users/allen/ai-infra/nacos/standalone/nacos-3.2.1-2026.03.30/conf/application.properties
-找到nacos.console.port这个配置属性，默认端口是8080，这会和我们的本地应用端口冲突，所以我改成了9090
-A: 访问http://localhost:9090/,会引导你注册登录。
+找到nacos.console.port这个配置属性，默认端口是8080，这会和我们的本地应用端口冲突，所以我改成了8090
+A: 访问http://localhost:8090/,会引导你注册登录。
 然后你就可以去配置管理中心新增配置了，或者去服务管理中心查看应用实例情况。这里我新建了一个动态配置验证动态配置的推送情况：
 
 在 Nacos 控制台创建 Data ID: order-system-jwt.yaml，Group: DEFAULT_GROUP，内容：

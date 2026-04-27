@@ -1,5 +1,6 @@
 package com.example.ordersystem.controller;
 
+import com.example.ordersystem.annotation.BusinessMetric;
 import com.example.ordersystem.entity.RefreshToken;
 import com.example.ordersystem.security.JwtUtil;
 import com.example.ordersystem.service.RefreshTokenService;
@@ -52,6 +53,7 @@ public class LoginController {
      * 验证用户名密码，成功后生成 JWT 并设置 Cookie
      */
     @PostMapping("/login")
+    @BusinessMetric(operation = "login")
     public String doLogin(@RequestParam String username,
                           @RequestParam String password,
                           HttpServletResponse response,

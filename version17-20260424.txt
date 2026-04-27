@@ -1,0 +1,111 @@
+Version 17 版本改动日志 – 业务监控与告警（Prometheus + Micrometer + Grafana）
+一、版本概述
+Version 17 在 Version 16（限流、熔断降级）基础上，引入 Prometheus + Micrometer + Grafana 技术栈，实现全链路的业务数据监控和告警。
+通过低侵入的 AOP + 自定义注解收集关键业务指标（用户注册、登录、下单、支付检查、取消订单、库存不足等），支持滑动窗口时间聚合，
+并提供失败时的完整业务上下文（MDC + 结构化日志）。同时，集成 Prometheus 拉取指标，Grafana 可视化展示，AlertManager 配置告警规则，
+使运维/产品人员能实时掌握系统业务运转状况。
+
+二、改动文件清单（树形结构）
+order-system-micro/
+├── order-module/
+│   ├── src/main/java/com/example/ordersystem/
+│   │   ├── annotation/
+│   │   │   └── BusinessMetric.java                      # 新增：业务指标自定义注解
+│   │   ├── aop/
+│   │   │   └── BusinessMetricAspect.java                # 新增：AOP 切面，收集指标并记录失败上下文
+│   │   ├── config/
+│   │   │   └── SecurityConfig.java                      # 修改：放行 /actuator/prometheus 端点
+│   │   ├── service/
+│   │   │   ├── StockService.java                        # 修改：区分库存不足与乐观锁冲突，增加库存不足指标
+│   │   │   └── PayCheckService.java                     # 添加 @BusinessMetric 注解（已有）
+│   │   └── controller/
+│   │       ├── LoginController.java                     # 添加 @BusinessMetric(operation = "login")
+│   │       ├── AdminController.java                     # 添加 @BusinessMetric(operation = "registerUser")
+│   │       ├── OrderController.java                     # 添加 @BusinessMetric(operation = "createOrder")
+│   │       └── OrderController.cancelOrder              # 添加 @BusinessMetric(operation = "cancelOrder")
+│   ├── src/main/resources/
+│   │   ├── application.yml                              # 新增 management 端点配置（metrics、prometheus）
+│   │   └── logback-spring.xml                           # 可选：调整日志格式为 JSON（结构化日志）
+│   └── pom.xml                                          # 新增 micrometer-registry-prometheus、actuator 依赖
+├── prometheus/
+│   └── prometheus.yml                                   # 新增：Prometheus 抓取配置（scrape job = order-system）
+├── grafana/
+│   └── dashboards/
+│       └── order-system-dashboard.json                  # 可选：预定义的 Grafana 仪表盘 JSON
+└── alertmanager/
+    └── business_alerts.yml                              # 可选：Prometheus 告警规则示例
+
+三、核心改动
+
+1. 安全配置放行监控端点
+SecurityConfig 中添加：
+.requestMatchers("/actuator/prometheus").permitAll()
+
+2. 应用配置 application.yml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    tags:
+      application: order-system
+
+3. Prometheus 配置 prometheus.yml(不是应用配置，是Prometheus配置！)
+scrape_configs:
+  - job_name: 'order-system'
+    scrape_interval: 15s
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['localhost:8082']   # 根据实际部署修改
+
+四、新增/修改的关键指标
+
+指标名称	                                        类型	            标签	                    说明
+business_operation_total	                    Counter	        operation, result	    各业务操作的总次数（成功/失败）
+business_operation_duration_seconds	            Timer	        operation	            业务操作耗时（秒）
+business_stock_insufficient_total	            Counter	        userId	                库存不足次数（真实库存不足）
+business_stock_optimistic_lock_failure_total    Counter	    userId	                乐观锁冲突次数（可选）
+
+PromQL 典型查询：
+- 最近15分钟下单总数：increase(business_operation_total{operation="createOrder"}[15m])
+- 订单成功率：sum(rate(business_operation_total{operation="createOrder",result="success"}[5m])) / sum(rate(business_operation_total{operation="createOrder"}[5m]))
+- 库存不足告警：increase(business_stock_insufficient_total[5m]) > 10
+
+五、部署与运维指引
+
+启动监控组件
+# 启动 Prometheus
+Option1: /usr/local/prometheus/prometheus-2.54.1.darwin-amd64/prometheus --config.file=prometheus.yml
+Option2: ./prometheus --config.file=prometheus.yml
+
+# 启动 Grafana
+Option1: /usr/local/grafana/grafana-12.2.5/bin/grafana-server
+Option2: ./bin/grafana-server web
+
+# （可选）启动 AlertManager
+./alertmanager --config.file=alertmanager.yml
+
+[验证数据流]
+- 确保 Order Module 已启动且 /actuator/prometheus 可访问。
+- Prometheus 目标状态（http://localhost:9090/targets）应为 UP。
+- 执行业务操作（如下单），等待 15 秒后 Prometheus 抓取。
+- 在 Grafana 中添加 Prometheus 数据源（URL: http://localhost:9090），导入仪表盘。
+
+常见问题
+- 403 Forbidden：已通过 SecurityConfig 放行解决。
+- 目标 DOWN：检查网络连通性，或修改 prometheus.yml 中的 targets 为正确 IP。
+- 无业务指标：确认 AOP 切面已加载，且业务方法被调用。
+
+六、版本对比摘要（Version 16 → Version 17）
+功能	            Version 16	        Version 17
+限流/熔断	    ✅ 支持	            ✅ 保留
+业务指标收集	    ❌	                ✅ 注解 + AOP，低侵入
+滑动窗口支持	    ❌ 依赖 PromQL	    ✅ 通过 rate()/increase() 实现
+失败上下文记录	❌	                ✅ MDC + 结构化日志
+库存不足区分	    ❌ 误判乐观锁	        ✅ 真实库存不足与乐观锁分离
+可视化	        ❌	                ✅ Grafana 仪表盘
+告警	            ❌	                ✅ Prometheus AlertManager

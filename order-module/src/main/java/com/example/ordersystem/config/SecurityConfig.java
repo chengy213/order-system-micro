@@ -45,7 +45,7 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())   // 禁用 CSRF（无状态 JWT 不需要）
                 .authorizeHttpRequests(auth -> auth
                         // 公开路径：欢迎页、登录页、静态资源、获取 token 的 API
-                        .requestMatchers("/", "/welcome", "/login", "/api/token", "/api/refresh_token", "/admin/**", "/css/**", "/js/**", "/error", "/druid").permitAll()
+                        .requestMatchers("/", "/welcome", "/login", "/api/token", "/api/refresh_token", "/admin/**", "/css/**", "/js/**", "/error", "/druid", "/actuator/prometheus").permitAll()
                         // 其余所有请求都需要认证
                         .anyRequest().authenticated()
                 )

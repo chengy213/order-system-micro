@@ -4,12 +4,15 @@ import com.example.ordersystem.entity.User;
 import com.example.ordersystem.repository.UserRepository;
 import com.example.ordersystem.util.RedisCacheManager;
 import com.example.ordersystem.util.RedisKeyConstants;
+import io.micrometer.core.instrument.MeterRegistry;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.concurrent.TimeUnit;
 
+@Slf4j
 @Service
 public class StockService {
 
@@ -18,6 +21,9 @@ public class StockService {
 
     @Autowired
     private RedisCacheManager redisCacheManager;
+
+    @Autowired
+    private MeterRegistry meterRegistry;
 
     private static final String STOCK_CACHE_PREFIX = "user:stock:";
     private static final long STOCK_CACHE_TTL_SECONDS = 180; // 3分钟
@@ -28,15 +34,32 @@ public class StockService {
         int retry = 3;
         while (retry-- > 0) {
             User user = userRepository.findById(userId).orElse(null);
-            if (user == null || user.getAvailableStock() < amount) return false;
+            if (user == null) {
+                log.warn("用户不存在: userId={}", userId);
+                return false;
+            }
+            // 先检查库存是否真的不足
+            if (user.getAvailableStock() < amount) {
+                // 真实库存不足，记录库存不足指标
+                meterRegistry.counter("business.stock.insufficient",
+                        "userId", String.valueOf(userId)).increment();
+                log.warn("库存不足: userId={}, required={}, available={}", userId, amount, user.getAvailableStock());
+                return false;
+            }
             int updated = userRepository.decreaseStock(userId, amount, user.getVersion());
             if (updated > 0) {
+                // 成功扣减
                 // 数据库更新成功，只删除缓存，不主动设置新值（避免脏数据）
                 String cacheKey = RedisCacheManager.getUserStockKey(userId);
                 redisCacheManager.delete(cacheKey);
                 return true;
             }
+            // 乐观锁冲突（version 不匹配），重试
         }
+        // 重试多次仍失败，记录乐观锁冲突指标
+        meterRegistry.counter("business.stock.optimistic_lock_failure",
+                "userId", String.valueOf(userId)).increment();
+        log.warn("乐观锁冲突导致扣减失败: userId={}, amount={}", userId, amount);
         return false;
     }
 

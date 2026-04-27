@@ -1,6 +1,7 @@
 package com.example.ordersystem.service;
 
 import com.alibaba.csp.sentinel.annotation.SentinelResource;
+import com.example.ordersystem.annotation.BusinessMetric;
 import com.example.ordersystem.client.PayClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +21,7 @@ public class PayCheckService {
     //Sentinel熔断降级策略（这里和Feign fallback不一致！）
     //慢调用比例、异常比例超过阈值（业务层面），防止系统雪崩，快速失败并降级
     @SentinelResource(value = "payCheck", fallback = "payCheckFallbackBySentinel")
+    @BusinessMetric(operation = "payCheck")
     public boolean doPayCheck(Long orderId, Long userId, String productName, Integer quantity) {
         return payClient.checkPayment(orderId, userId, productName, quantity);
     }

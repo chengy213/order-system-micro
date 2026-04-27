@@ -1,5 +1,6 @@
 package com.example.ordersystem.controller;
 
+import com.example.ordersystem.annotation.BusinessMetric;
 import com.example.ordersystem.entity.Order;
 import com.example.ordersystem.messaging.rocketmq.StockTransactionMessagePublisher;
 import com.example.ordersystem.security.SecurityUser;
@@ -39,6 +40,7 @@ public class OrderController {
      * 订单主页：展示订单列表
      */
     @GetMapping("/orders")
+    @BusinessMetric(operation = "orders")
     public String ordersPage(@AuthenticationPrincipal SecurityUser user, Model model) {
         Long userId = user.getUserId();
         List<Order> orders = orderService.getOrdersByUserId(userId);
@@ -53,6 +55,7 @@ public class OrderController {
      * 创建新订单（下单）
      */
     @PostMapping("/order/create")
+    @BusinessMetric(operation = "createOrder")
     public String createOrder(@RequestParam String productName,
                               @RequestParam Integer quantity,
                               @AuthenticationPrincipal SecurityUser user,
@@ -75,6 +78,7 @@ public class OrderController {
      * 取消订单
      */
     @PostMapping("/order/cancel/{orderId}")
+    @BusinessMetric(operation = "cancelOrder")
     public String cancelOrder(@PathVariable Long orderId,
                               @AuthenticationPrincipal SecurityUser user,
                               RedirectAttributes redirectAttributes) {

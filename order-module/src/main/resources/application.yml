@@ -160,3 +160,15 @@ payment:
 pay:
   service:
     url: http://localhost:8081   # 非 Nacos 模式下的直连地址
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    tags:
+      application: order-system
