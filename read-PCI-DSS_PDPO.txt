@@ -1,0 +1,374 @@
+***香港要求的安全合规的PCI-DSS/PDPO规范-Java开发者实践指南***
+1.PCI-DSS - 支付安全的全球准则
+- 安全通信：使用HTTPS和TLS协议保障数据传输安全，使用SSLContext设置TLSv1.2。在Spring Security中，可通过配置requiresChannel()强制所有请求使用HTTPS。
+- 数据加密：对敏感数据字段进行加密或脱敏。PCI DSS要求存储的银行卡号必须采用强加密或截断处理，可利用Java密码学架构（JCA/JCE）实现加密。
+- 身份验证与访问控制：使用Spring Security等框架实现用户认证和权限控制。
+- 日志与审计：记录完整的用户操作日志，包含时间戳、操作人、操作内容等，且日志记录不能包含敏感信息（如明文密码或完整PAN）。
+2.PDPO - 香港个人数据保护的基石
+- 数据保护实践：
+    - 传输加密：所有涉及个人数据的API调用，必须强制使用TLS 1.2+加密传输。
+    - 静态加密：数据库中存储的个人数据字段（如身份证号、手机号）应进行加密处理或脱敏展示。可采用AES-256算法加密。
+    - 访问控制：基于角色的访问控制（RBAC）与最小权限原则，结合MFA。
+    - 数据最小化：在处理用户数据时，严格遵循数据最小化原则，只请求和处理完成服务所必需的最少数据。
+
+[具体的实现]
+
+我们针对 version18 项目，按照 PCI-DSS 和 PDPO 的 Java 开发者实践指南，逐项进行优化和补全。以下是完整的实现方案和代码。
+
+---
+
+## 一、安全通信（HTTPS + TLS 1.2/1.3）
+
+### 1.1 生成自签名证书（用于开发/测试）
+
+```bash
+keytool -genkey -alias order-system -storetype PKCS12 -keyalg RSA -keysize 2048 -keystore keystore.p12 -validity 3650 -dname "CN=localhost, OU=OrderSystem, O=Example, L=Hangzhou, ST=Zhejiang, C=CN" -storepass changeit -keypass changeit
+```
+
+将 `keystore.p12` 放入 `gateway-module/src/main/resources/` 和 `order-module/src/main/resources/`。
+
+### 1.2 配置 HTTPS（`application.yml`）
+
+#### Gateway 模块配置
+
+```yaml
+server:
+  port: 8443   # HTTPS 端口
+  ssl:
+    key-store: classpath:keystore.p12
+    key-store-password: changeit
+    key-store-type: PK12
+    key-alias: order-system
+    protocol: TLSv1.2
+    enabled-protocols: TLSv1.2,TLSv1.3
+  http2:
+    enabled: true
+
+# 强制重定向 HTTP → HTTPS
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: order-service
+          uri: lb://order-module
+          predicates:
+            - Path=/**
+          filters:
+            - name: HttpsRedirectFilter
+```
+
+#### Order Module 配置
+
+```yaml
+server:
+  port: 8444
+  ssl:
+    key-store: classpath:keystore.p12
+    key-store-password: changeit
+    key-store-type: PK12
+    key-alias: order-system
+    protocol: TLSv1.2
+    enabled-protocols: TLSv1.2,TLSv1.3
+```
+
+### 1.3 Spring Security 强制 HTTPS
+
+在 `SecurityConfig` 中添加：
+
+```java
+http.requiresChannel(channel -> channel.anyRequest().requiresSecure());
+```
+
+同时配置 `TrustStore` 用于 Feign 调用（如果 Feign 需要 HTTPS）。
+
+---
+
+## 二、数据加密（AES-256）
+
+### 2.1 创建加密工具类（支持敏感字段加密/解密）
+
+```java
+package com.example.ordersystem.util;
+
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
+import java.util.Base64;
+
+/**
+ * AES-256 GCM 加密工具（符合 PCI DSS 强加密要求）
+ * 密钥存储于环境变量或配置中心，禁止硬编码
+ */
+public class AesEncryptor {
+
+    private static final String ALGORITHM = "AES";
+    private static final String TRANSFORMATION = "AES/GCM/NoPadding";
+    private static final int GCM_TAG_LENGTH = 128;
+    private static final int GCM_IV_LENGTH = 12;
+
+    // 从环境变量或配置文件中读取（禁止硬编码）
+    private static final String SECRET_KEY = System.getenv("ENCRYPTION_KEY"); // 32字节 Base64
+    static {
+        if (SECRET_KEY == null || SECRET_KEY.isEmpty()) {
+            throw new RuntimeException("ENCRYPTION_KEY environment variable not set");
+        }
+    }
+
+    private static SecretKey getKey() {
+        byte[] decoded = Base64.getDecoder().decode(SECRET_KEY);
+        return new SecretKeySpec(decoded, ALGORITHM);
+    }
+
+    /**
+     * 加密数据
+     * @param plainText 明文
+     * @return Base64 编码的密文（IV+密文）
+     */
+    public static String encrypt(String plainText) throws Exception {
+        Cipher cipher = Cipher.getInstance(TRANSFORMATION);
+        byte[] iv = new byte[GCM_IV_LENGTH];
+        SecureRandom random = new SecureRandom();
+        random.nextBytes(iv);
+        GCMParameterSpec spec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
+        cipher.init(Cipher.ENCRYPT_MODE, getKey(), spec);
+        byte[] cipherText = cipher.doFinal(plainText.getBytes(StandardCharsets.UTF_8));
+        byte[] combined = new byte[iv.length + cipherText.length];
+        System.arraycopy(iv, 0, combined, 0, iv.length);
+        System.arraycopy(cipherText, 0, combined, iv.length, cipherText.length);
+        return Base64.getEncoder().encodeToString(combined);
+    }
+
+    /**
+     * 解密数据
+     * @param cipherText Base64 编码的密文（IV+密文）
+     * @return 明文
+     */
+    public static String decrypt(String cipherText) throws Exception {
+        byte[] combined = Base64.getDecoder().decode(cipherText);
+        byte[] iv = new byte[GCM_IV_LENGTH];
+        byte[] encrypted = new byte[combined.length - GCM_IV_LENGTH];
+        System.arraycopy(combined, 0, iv, 0, iv.length);
+        System.arraycopy(combined, iv.length, encrypted, 0, encrypted.length);
+        Cipher cipher = Cipher.getInstance(TRANSFORMATION);
+        GCMParameterSpec spec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
+        cipher.init(Cipher.DECRYPT_MODE, getKey(), spec);
+        byte[] plainBytes = cipher.doFinal(encrypted);
+        return new String(plainBytes, StandardCharsets.UTF_8);
+    }
+}
+```
+
+### 2.2 修改 `User` 实体，添加敏感字段（例如 `phoneNumber`）
+
+```java
+@Entity
+@Table(name = "t_user")
+public class User {
+    // ... 已有字段
+    @Column(name = "phone_number")
+    private String phoneNumber; // 存储加密后的手机号
+
+    // getter/setter
+}
+```
+
+### 2.3 在保存和查询时自动加密/解密（使用 JPA 监听器或服务层）
+
+#### 使用 `@PrePersist` 和 `@PostLoad` 监听器
+
+```java
+@EntityListeners(AuditingEntityListener.class)
+public class User {
+    @Transient
+    private String plainPhoneNumber; // 用于临时存储明文
+
+    public String getPlainPhoneNumber() {
+        return plainPhoneNumber;
+    }
+
+    @PrePersist
+    @PreUpdate
+    private void encryptPhone() {
+        if (plainPhoneNumber != null && !plainPhoneNumber.isEmpty()) {
+            try {
+                this.phoneNumber = AesEncryptor.encrypt(plainPhoneNumber);
+            } catch (Exception e) {
+                throw new RuntimeException("Encryption failed", e);
+            }
+        }
+    }
+
+    @PostLoad
+    private void decryptPhone() {
+        if (this.phoneNumber != null && !this.phoneNumber.isEmpty()) {
+            try {
+                this.plainPhoneNumber = AesEncryptor.decrypt(this.phoneNumber);
+            } catch (Exception e) {
+                throw new RuntimeException("Decryption failed", e);
+            }
+        }
+    }
+}
+```
+
+**注意**：实际使用时，业务代码应读取 `plainPhoneNumber`，而不是加密字段。
+
+---
+
+## 三、日志审计（不记录敏感信息）
+
+### 3.1 修改 `OperationLogAspect`，过滤敏感字段
+
+在切面中，对参数和返回值进行脱敏处理：
+
+```java
+// 在记录日志之前，对敏感信息进行脱敏
+private String maskSensitiveData(String input) {
+    if (input == null) return null;
+    // 脱敏手机号：保留前3后4
+    input = input.replaceAll("(\\d{3})\\d{4}(\\d{4})", "$1****$2");
+    // 脱敏身份证号
+    input = input.replaceAll("(\\d{4})\\d{10}(\\d{4})", "$1**********$2");
+    // 脱敏密码（任何包含 password 的字段值替换为 ******）
+    input = input.replaceAll("(?i)\"password\":\"[^\"]*\"", "\"password\":\"******\"");
+    return input;
+}
+```
+
+在 `recordOperation` 方法中应用脱敏。
+
+### 3.2 确保日志不记录 JWT Token
+
+- 在 `JwtAuthenticationFilter` 中，日志打印时不要输出完整 token（只打印前几位）。
+- 在 MDC 中不要放入 token。
+
+---
+
+## 四、访问控制（RBAC + 最小权限）
+
+### 4.1 扩展 `SecurityUser`，支持多角色
+
+```java
+public class SecurityUser implements UserDetails {
+    private final Long userId;
+    private final String username;
+    private final Collection<? extends GrantedAuthority> authorities;
+
+    public SecurityUser(User user) {
+        this.userId = user.getId();
+        this.username = user.getUsername();
+        // 从数据库加载角色（假设 User 有 roles 字段）
+        this.authorities = user.getRoles().stream()
+                .map(role -> new SimpleGrantedAuthority(role.getName()))
+                .collect(Collectors.toList());
+    }
+    // ...
+}
+```
+
+### 4.2 使用 `@PreAuthorize` 进行方法级权限控制
+
+```java
+@PreAuthorize("hasRole('ADMIN')")
+@PostMapping("/admin/stock/{userId}")
+public String setStock(...) { ... }
+```
+
+### 4.3 最小权限原则：用户只能访问自己的数据
+
+在 `OrderController` 中，确保用户只能查看自己的订单：
+
+```java
+@GetMapping("/orders")
+public String ordersPage(@AuthenticationPrincipal SecurityUser user, Model model) {
+    List<Order> orders = orderService.getOrdersByUserId(user.getUserId());
+    // ...
+}
+```
+
+---
+
+## 五、数据最小化（DTO 只返回必要字段）
+
+### 5.1 创建 `UserResponseDTO`，只暴露必要信息
+
+```java
+public class UserResponseDTO {
+    private Long id;
+    private String username;
+    // 不返回手机号、身份证等敏感字段
+}
+```
+
+### 5.2 在 Controller 中转换
+
+```java
+@GetMapping("/user/profile")
+public UserResponseDTO getUserProfile(@AuthenticationPrincipal SecurityUser user) {
+    return new UserResponseDTO(user.getUserId(), user.getUsername());
+}
+```
+
+---
+
+## 六、强制 TLS 1.2+（客户端和 Feign）
+
+### 6.1 Feign 客户端配置（支持 HTTPS）
+
+```java
+@Configuration
+public class FeignConfig {
+    @Bean
+    public Client feignClient() {
+        try {
+            SSLContext sslContext = SSLContext.getInstance("TLSv1.2");
+            sslContext.init(null, new TrustManager[]{new X509TrustManager() {
+                public void checkClientTrusted(X509Certificate[] chain, String authType) {}
+                public void checkServerTrusted(X509Certificate[] chain, String authType) {}
+                public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+            }}, new SecureRandom());
+            return new Client.Default(sslContext.getSocketFactory(), (hostname, session) -> true);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+}
+```
+
+---
+
+## 七、合规性验证清单
+
+| 要求 | 实现方式 | 代码位置 |
+|------|----------|----------|
+| HTTPS + TLS 1.2/1.3 | Gateway + Order Module 配置 SSL，强制重定向 | `application.yml` |
+| 敏感数据加密（AES-256 GCM） | `AesEncryptor` + JPA 监听器 | `util/AesEncryptor.java`, `entity/User.java` |
+| 日志审计（无敏感信息） | 切面中脱敏 | `aop/OperationLogAspect.java` |
+| RBAC 权限控制 | Spring Security + `@PreAuthorize` | `security/SecurityUser.java`, 控制器注解 |
+| 最小权限 | 用户只能访问自己的订单 | `OrderController` |
+| 数据最小化 | DTO 过滤字段 | `dto/UserResponseDTO.java` |
+| Feign HTTPS | 自定义 `Client` Bean | `config/FeignConfig.java` |
+
+---
+
+## 八、环境变量配置
+
+在部署时设置环境变量：
+
+```bash
+export ENCRYPTION_KEY="your-32-byte-base64-encoded-key"
+```
+
+生成密钥的方法：
+
+```bash
+openssl rand -base64 32
+```
+
+---
+
+以上实现覆盖了 PCI-DSS 和 PDPO 指南中针对 Java 开发者的核心要求。请根据实际业务场景调整脱敏规则和加密范围。建议定期进行安全审计和渗透测试。
